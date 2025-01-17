@@ -15,6 +15,7 @@ package v1_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -28,7 +29,9 @@ import (
 	"github.com/tektoncd/pipeline/test/diff"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/pointer"
 	"knative.dev/pkg/apis"
 )
 
@@ -331,6 +334,41 @@ func TestTaskSpecValidate(t *testing.T) {
 				#!/usr/bin/env bash
 				hello world`,
 			}},
+		},
+	}, {
+		name: "step template included in validation with stepaction",
+		fields: fields{
+			Steps: []v1.Step{{
+				Name: "astep",
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+			}},
+			StepTemplate: &v1.StepTemplate{
+				Image: "some-image",
+				SecurityContext: &corev1.SecurityContext{
+					RunAsNonRoot: pointer.Bool(true),
+				},
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "data",
+					MountPath: "/workspace/data",
+				}},
+				Env: []corev1.EnvVar{{
+					Name:  "KEEP_THIS",
+					Value: "A_VALUE",
+				}, {
+					Name: "SOME_KEY_1",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key:                  "A_KEY",
+							LocalObjectReference: corev1.LocalObjectReference{Name: "A_NAME"},
+						},
+					},
+				}, {
+					Name:  "SOME_KEY_2",
+					Value: "VALUE_2",
+				}},
+			},
 		},
 	}, {
 		name: "valid step with parameterized script",
@@ -755,7 +793,8 @@ func TestTaskValidateError(t *testing.T) {
 				Spec: v1.TaskSpec{
 					Params: tt.fields.Params,
 					Steps:  tt.fields.Steps,
-				}}
+				},
+			}
 			ctx := cfgtesting.EnableAlphaAPIFields(context.Background())
 			task.SetDefaults(ctx)
 			err := task.Validate(ctx)
@@ -1074,7 +1113,8 @@ func TestTaskSpecValidateError(t *testing.T) {
 					Name:       "mystep",
 					Image:      "my-image",
 					WorkingDir: "/foo/bar/src/",
-				}},
+				},
+			},
 		},
 		expectedError: apis.FieldError{
 			Message: `variable type invalid in "$(params.baz[*])"`,
@@ -1419,43 +1459,44 @@ func TestTaskSpecValidateErrorWithStepActionRef_CreateUpdateEvent(t *testing.T) 
 		isCreate      bool
 		isUpdate      bool
 		expectedError apis.FieldError
-	}{{
-		name: "is create ctx",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
+	}{
+		{
+			name: "is create ctx",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+			}},
+			isCreate: true,
+			isUpdate: false,
+			expectedError: apis.FieldError{
+				Message: "feature flag enable-step-actions should be set to true to reference StepActions in Steps.",
+				Paths:   []string{"steps[0]"},
 			},
-		}},
-		isCreate: true,
-		isUpdate: false,
-		expectedError: apis.FieldError{
-			Message: "feature flag enable-step-actions should be set to true to reference StepActions in Steps.",
-			Paths:   []string{"steps[0]"},
+		}, {
+			name: "is update ctx",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+			}},
+			isCreate: false,
+			isUpdate: true,
+			expectedError: apis.FieldError{
+				Message: "feature flag enable-step-actions should be set to true to reference StepActions in Steps.",
+				Paths:   []string{"steps[0]"},
+			},
+		}, {
+			name: "ctx is not create or update",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+			}},
+			isCreate:      false,
+			isUpdate:      false,
+			expectedError: apis.FieldError{},
 		},
-	}, {
-		name: "is update ctx",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-		}},
-		isCreate: false,
-		isUpdate: true,
-		expectedError: apis.FieldError{
-			Message: "feature flag enable-step-actions should be set to true to reference StepActions in Steps.",
-			Paths:   []string{"steps[0]"},
-		},
-	}, {
-		name: "ctx is not create or update",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-		}},
-		isCreate:      false,
-		isUpdate:      false,
-		expectedError: apis.FieldError{},
-	},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1487,123 +1528,124 @@ func TestTaskSpecValidateErrorWithStepActionRef(t *testing.T) {
 		name          string
 		Steps         []v1.Step
 		expectedError apis.FieldError
-	}{{
-		name: "Cannot use image with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-			Image: "foo",
-		}},
-		expectedError: apis.FieldError{
-			Message: "image cannot be used with Ref",
-			Paths:   []string{"steps[0].image"},
-		},
-	}, {
-		name: "Cannot use command with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-			Command: []string{"foo"},
-		}},
-		expectedError: apis.FieldError{
-			Message: "command cannot be used with Ref",
-			Paths:   []string{"steps[0].command"},
-		},
-	}, {
-		name: "Cannot use args with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-			Args: []string{"foo"},
-		}},
-		expectedError: apis.FieldError{
-			Message: "args cannot be used with Ref",
-			Paths:   []string{"steps[0].args"},
-		},
-	}, {
-		name: "Cannot use script with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-			Script: "echo hi",
-		}},
-		expectedError: apis.FieldError{
-			Message: "script cannot be used with Ref",
-			Paths:   []string{"steps[0].script"},
-		},
-	}, {
-		name: "Cannot use workingDir with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-			WorkingDir: "/workspace",
-		}},
-		expectedError: apis.FieldError{
-			Message: "working dir cannot be used with Ref",
-			Paths:   []string{"steps[0].workingDir"},
-		},
-	}, {
-		name: "Cannot use env with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
-			},
-			Env: []corev1.EnvVar{{
-				Name:  "env1",
-				Value: "value1",
+	}{
+		{
+			name: "Cannot use image with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				Image: "foo",
 			}},
-		}},
-		expectedError: apis.FieldError{
-			Message: "env cannot be used with Ref",
-			Paths:   []string{"steps[0].env"},
-		},
-	}, {
-		name: "Cannot use params without Ref",
-		Steps: []v1.Step{{
-			Image: "my-image",
-			Params: v1.Params{{
-				Name: "param",
-			}},
-		}},
-		expectedError: apis.FieldError{
-			Message: "params cannot be used without Ref",
-			Paths:   []string{"steps[0].params"},
-		},
-	}, {
-		name: "Cannot use volumeMounts with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
+			expectedError: apis.FieldError{
+				Message: "image cannot be used with Ref",
+				Paths:   []string{"steps[0].image"},
 			},
-			VolumeMounts: []corev1.VolumeMount{{
-				Name:      "$(params.foo)",
-				MountPath: "/registry-config",
+		}, {
+			name: "Cannot use command with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				Command: []string{"foo"},
 			}},
-		}},
-		expectedError: apis.FieldError{
-			Message: "volumeMounts cannot be used with Ref",
-			Paths:   []string{"steps[0].volumeMounts"},
-		},
-	}, {
-		name: "Cannot use results with Ref",
-		Steps: []v1.Step{{
-			Ref: &v1.Ref{
-				Name: "stepAction",
+			expectedError: apis.FieldError{
+				Message: "command cannot be used with Ref",
+				Paths:   []string{"steps[0].command"},
 			},
-			Results: []v1.StepResult{{
-				Name: "result",
+		}, {
+			name: "Cannot use args with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				Args: []string{"foo"},
 			}},
-		}},
-		expectedError: apis.FieldError{
-			Message: "results cannot be used with Ref",
-			Paths:   []string{"steps[0].results"},
+			expectedError: apis.FieldError{
+				Message: "args cannot be used with Ref",
+				Paths:   []string{"steps[0].args"},
+			},
+		}, {
+			name: "Cannot use script with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				Script: "echo hi",
+			}},
+			expectedError: apis.FieldError{
+				Message: "script cannot be used with Ref",
+				Paths:   []string{"steps[0].script"},
+			},
+		}, {
+			name: "Cannot use workingDir with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				WorkingDir: "/workspace",
+			}},
+			expectedError: apis.FieldError{
+				Message: "working dir cannot be used with Ref",
+				Paths:   []string{"steps[0].workingDir"},
+			},
+		}, {
+			name: "Cannot use env with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				Env: []corev1.EnvVar{{
+					Name:  "env1",
+					Value: "value1",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "env cannot be used with Ref",
+				Paths:   []string{"steps[0].env"},
+			},
+		}, {
+			name: "Cannot use params without Ref",
+			Steps: []v1.Step{{
+				Image: "my-image",
+				Params: v1.Params{{
+					Name: "param",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "params cannot be used without Ref",
+				Paths:   []string{"steps[0].params"},
+			},
+		}, {
+			name: "Cannot use volumeMounts with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "$(params.foo)",
+					MountPath: "/registry-config",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "volumeMounts cannot be used with Ref",
+				Paths:   []string{"steps[0].volumeMounts"},
+			},
+		}, {
+			name: "Cannot use results with Ref",
+			Steps: []v1.Step{{
+				Ref: &v1.Ref{
+					Name: "stepAction",
+				},
+				Results: []v1.StepResult{{
+					Name: "result",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "results cannot be used with Ref",
+				Paths:   []string{"steps[0].results"},
+			},
 		},
-	},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1628,6 +1670,405 @@ func TestTaskSpecValidateErrorWithStepActionRef(t *testing.T) {
 	}
 }
 
+func TestTaskSpecValidateErrorWithStepResultRef(t *testing.T) {
+	tests := []struct {
+		name          string
+		Steps         []v1.Step
+		expectedError apis.FieldError
+	}{
+		{
+			name: "Cannot reference step results in image",
+			Steps: []v1.Step{{
+				Image: "$(steps.prevStep.results.resultName)",
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+				Paths:   []string{"steps[0].image"},
+			},
+		}, {
+			name: "Cannot reference step results in script",
+			Steps: []v1.Step{{
+				Image:  "my-img",
+				Script: "echo $(steps.prevStep.results.resultName)",
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+				Paths:   []string{"steps[0].script"},
+			},
+		}, {
+			name: "Cannot reference step results in workingDir",
+			Steps: []v1.Step{{
+				Image:      "my-img",
+				WorkingDir: "$(steps.prevStep.results.resultName)",
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+				Paths:   []string{"steps[0].workingDir"},
+			},
+		}, {
+			name: "Cannot reference step results in envFrom",
+			Steps: []v1.Step{{
+				Image: "my-img",
+				EnvFrom: []corev1.EnvFromSource{{
+					Prefix: "$(steps.prevStep.results.resultName)",
+					ConfigMapRef: &corev1.ConfigMapEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "$(steps.prevStep.results.resultName)",
+						},
+					},
+					SecretRef: &corev1.SecretEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "$(steps.prevStep.results.resultName)",
+						},
+					},
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+				Paths:   []string{"steps[0].envFrom.configMapRef", "steps[0].envFrom.prefix", "steps[0].envFrom.secretRef"},
+			},
+		}, {
+			name: "Cannot reference step results in VolumeMounts",
+			Steps: []v1.Step{{
+				Image: "my-img",
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "$(steps.prevStep.results.resultName)",
+					MountPath: "$(steps.prevStep.results.resultName)",
+					SubPath:   "$(steps.prevStep.results.resultName)",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+				Paths:   []string{"steps[0].volumeMounts.name", "steps[0].volumeMounts.mountPath", "steps[0].volumeMounts.subPath"},
+			},
+		}, {
+			name: "Cannot reference step results in VolumeDevices",
+			Steps: []v1.Step{{
+				Image: "my-img",
+				VolumeDevices: []corev1.VolumeDevice{{
+					Name:       "$(steps.prevStep.results.resultName)",
+					DevicePath: "$(steps.prevStep.results.resultName)",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+				Paths:   []string{"steps[0].volumeDevices.name", "steps[0].volumeDevices.devicePath"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err == nil {
+				t.Fatalf("Expected an error, got nothing for %v", ts)
+			}
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("TaskSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+func TestTaskSpecValidateSuccessWithArtifactsRefFlagEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		Steps []v1.Step
+	}{
+		{
+			name: "reference step artifacts in Env",
+			Steps: []v1.Step{{
+				Image: "busybox",
+				Env:   []corev1.EnvVar{{Name: "AAA", Value: "$(steps.aaa.outputs.image)"}},
+			}},
+		},
+		{
+			name: "reference step artifacts path in Env",
+			Steps: []v1.Step{{
+				Image: "busybox",
+				Env:   []corev1.EnvVar{{Name: "AAA", Value: "$(step.artifacts.path)"}},
+			}},
+		},
+		{
+			name: "reference step artifacts in Script",
+			Steps: []v1.Step{{
+				Image:  "busybox",
+				Script: "echo $(steps.aaa.inputs.bbb)",
+			}},
+		},
+		{
+			name: "reference step artifacts path in Script",
+			Steps: []v1.Step{{
+				Image:  "busybox",
+				Script: "echo 123 >> $(step.artifacts.path)",
+			}},
+		},
+		{
+			name: "reference step artifacts in Command",
+			Steps: []v1.Step{{
+				Image:   "busybox",
+				Command: []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+		},
+		{
+			name: "reference step artifacts path in Command",
+			Steps: []v1.Step{{
+				Image:   "busybox",
+				Command: []string{"echo", "$(step.artifacts.path)"},
+			}},
+		},
+		{
+			name: "reference step artifacts in Args",
+			Steps: []v1.Step{{
+				Image: "busybox",
+				Args:  []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+		},
+		{
+			name: "reference step artifacts path in Args",
+			Steps: []v1.Step{{
+				Image: "busybox",
+				Args:  []string{"echo", "$(step.artifacts.path)"},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+					EnableArtifacts:   true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err != nil {
+				t.Fatalf("Expected no errors, got err for %v", err)
+			}
+		})
+	}
+}
+func TestTaskSpecValidateErrorWithArtifactsRefFlagNotEnabled(t *testing.T) {
+	tests := []struct {
+		name          string
+		Steps         []v1.Step
+		expectedError apis.FieldError
+	}{
+		{
+			name: "Cannot reference step artifacts in Env without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Env: []corev1.EnvVar{{Name: "AAA", Value: "$(steps.aaa.outputs.image)"}},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in Env without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Env: []corev1.EnvVar{{Name: "AAA", Value: "$(step.artifacts.path)"}},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in Script without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Script: "echo $(steps.aaa.inputs.bbb)",
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in Script without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Script: "echo 123 >> $(step.artifacts.path)",
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in Command without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Command: []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in Command without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Command: []string{"echo", "$(step.artifacts.path)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in Args without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Args: []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in Args without setting enable-artifacts to true",
+			Steps: []v1.Step{{
+				Args: []string{"echo", "$(step.artifacts.path)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err == nil {
+				t.Fatalf("Expected an error, got nothing for %v", ts)
+			}
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("TaskSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestTaskSpecValidateErrorWithArtifactsRef(t *testing.T) {
+	tests := []struct {
+		name          string
+		Steps         []v1.Step
+		expectedError apis.FieldError
+	}{{
+		name: "Cannot reference step artifacts in image",
+		Steps: []v1.Step{{
+			Image: "$(steps.prevStep.outputs.aaa)",
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+			Paths:   []string{"steps[0].image"},
+		},
+	},
+		{
+			name: "Cannot reference step artifacts in workingDir",
+			Steps: []v1.Step{{
+				Image:      "my-img",
+				WorkingDir: "$(steps.prevStep.outputs.aaa)",
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].workingDir"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in envFrom",
+			Steps: []v1.Step{{
+				Image: "my-img",
+				EnvFrom: []corev1.EnvFromSource{{
+					Prefix: "$(steps.prevStep.outputs.aaa)",
+					ConfigMapRef: &corev1.ConfigMapEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "$(steps.prevStep.outputs.aaa)",
+						},
+					},
+					SecretRef: &corev1.SecretEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "$(steps.prevStep.outputs.aaa)",
+						},
+					},
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].envFrom.configMapRef", "steps[0].envFrom.prefix", "steps[0].envFrom.secretRef"},
+			},
+		}, {
+			name: "Cannot reference step artifacts in VolumeMounts",
+			Steps: []v1.Step{{
+				Image: "my-img",
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "$(steps.prevStep.outputs.aaa)",
+					MountPath: "$(steps.prevStep.outputs.aaa)",
+					SubPath:   "$(steps.prevStep.outputs.aaa)",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].volumeMounts.name", "steps[0].volumeMounts.mountPath", "steps[0].volumeMounts.subPath"},
+			},
+		}, {
+			name: "Cannot reference step artifacts in VolumeDevices",
+			Steps: []v1.Step{{
+				Image: "my-img",
+				VolumeDevices: []corev1.VolumeDevice{{
+					Name:       "$(steps.prevStep.outputs.aaa)",
+					DevicePath: "$(steps.prevStep.outputs.aaa)",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].volumeDevices.name", "steps[0].volumeDevices.devicePath"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err == nil {
+				t.Fatalf("Expected an error, got nothing for %v", ts)
+			}
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("TaskSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
 func TestTaskSpecValidateErrorSidecars(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1906,70 +2347,72 @@ func TestIncompatibleAPIVersions(t *testing.T) {
 		name            string
 		requiredVersion string
 		spec            v1.TaskSpec
-	}{{
-		name:            "step workspace requires beta",
-		requiredVersion: "beta",
-		spec: v1.TaskSpec{
-			Workspaces: []v1.WorkspaceDeclaration{{
-				Name: "foo",
-			}},
-			Steps: []v1.Step{{
-				Image: "foo",
-				Workspaces: []v1.WorkspaceUsage{{
+	}{
+		{
+			name:            "step workspace requires beta",
+			requiredVersion: "beta",
+			spec: v1.TaskSpec{
+				Workspaces: []v1.WorkspaceDeclaration{{
 					Name: "foo",
 				}},
-			}},
-		},
-	}, {
-		name:            "sidecar workspace requires beta",
-		requiredVersion: "beta",
-		spec: v1.TaskSpec{
-			Workspaces: []v1.WorkspaceDeclaration{{
-				Name: "foo",
-			}},
-			Steps: []v1.Step{{
-				Image: "foo",
-			}},
-			Sidecars: []v1.Sidecar{{
-				Image: "foo",
-				Workspaces: []v1.WorkspaceUsage{{
+				Steps: []v1.Step{{
+					Image: "foo",
+					Workspaces: []v1.WorkspaceUsage{{
+						Name: "foo",
+					}},
+				}},
+			},
+		}, {
+			name:            "sidecar workspace requires beta",
+			requiredVersion: "beta",
+			spec: v1.TaskSpec{
+				Workspaces: []v1.WorkspaceDeclaration{{
 					Name: "foo",
 				}},
-			}},
-		},
-	}, {
-		name:            "windows script support requires alpha",
-		requiredVersion: "alpha",
-		spec: v1.TaskSpec{
-			Steps: []v1.Step{{
-				Image: "my-image",
-				Script: `
+				Steps: []v1.Step{{
+					Image: "foo",
+				}},
+				Sidecars: []v1.Sidecar{{
+					Image: "foo",
+					Workspaces: []v1.WorkspaceUsage{{
+						Name: "foo",
+					}},
+				}},
+			},
+		}, {
+			name:            "windows script support requires alpha",
+			requiredVersion: "alpha",
+			spec: v1.TaskSpec{
+				Steps: []v1.Step{{
+					Image: "my-image",
+					Script: `
 				#!win powershell -File
 				script-1`,
-			}},
+				}},
+			},
+		}, {
+			name:            "stdout stream support requires alpha",
+			requiredVersion: "alpha",
+			spec: v1.TaskSpec{
+				Steps: []v1.Step{{
+					Image: "foo",
+					StdoutConfig: &v1.StepOutputConfig{
+						Path: "/tmp/stdout.txt",
+					},
+				}},
+			},
+		}, {
+			name:            "stderr stream support requires alpha",
+			requiredVersion: "alpha",
+			spec: v1.TaskSpec{
+				Steps: []v1.Step{{
+					Image: "foo",
+					StderrConfig: &v1.StepOutputConfig{
+						Path: "/tmp/stderr.txt",
+					},
+				}},
+			},
 		},
-	}, {
-		name:            "stdout stream support requires alpha",
-		requiredVersion: "alpha",
-		spec: v1.TaskSpec{
-			Steps: []v1.Step{{
-				Image: "foo",
-				StdoutConfig: &v1.StepOutputConfig{
-					Path: "/tmp/stdout.txt",
-				},
-			}},
-		},
-	}, {
-		name:            "stderr stream support requires alpha",
-		requiredVersion: "alpha",
-		spec: v1.TaskSpec{
-			Steps: []v1.Step{{
-				Image: "foo",
-				StderrConfig: &v1.StepOutputConfig{
-					Path: "/tmp/stderr.txt",
-				},
-			}},
-		}},
 	} {
 		for _, version := range versions {
 			testName := fmt.Sprintf("(using %s) %s", version, tt.name)
@@ -1999,76 +2442,6 @@ func TestIncompatibleAPIVersions(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestTaskBetaFields(t *testing.T) {
-	tests := []struct {
-		name string
-		spec v1.TaskSpec
-	}{{
-		name: "array param indexing",
-		spec: v1.TaskSpec{
-			Params: []v1.ParamSpec{{Name: "foo", Type: v1.ParamTypeArray}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo $(params.foo[1])`,
-			}},
-		},
-	}, {
-		name: "object params",
-		spec: v1.TaskSpec{
-			Params: []v1.ParamSpec{{Name: "foo", Type: v1.ParamTypeObject, Properties: map[string]v1.PropertySpec{"bar": {Type: v1.ParamTypeString}}}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo $(params.foo.bar)`,
-			}},
-		},
-	}, {
-		name: "array results",
-		spec: v1.TaskSpec{
-			Results: []v1.TaskResult{{Name: "array-result", Type: v1.ResultsTypeArray}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo -n "[\"hello\",\"world\"]" | tee $(results.array-result.path)`,
-			}},
-		},
-	}, {
-		name: "object results",
-		spec: v1.TaskSpec{
-			Results: []v1.TaskResult{{Name: "object-result", Type: v1.ResultsTypeObject,
-				Properties: map[string]v1.PropertySpec{}}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo -n "{\"hello\":\"world\"}" | tee $(results.object-result.path)`,
-			}},
-		},
-	}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := cfgtesting.EnableStableAPIFields(context.Background())
-			task := v1.Task{ObjectMeta: metav1.ObjectMeta{Name: "foo"}, Spec: tt.spec}
-			if err := task.Validate(ctx); err == nil {
-				t.Errorf("no error when using beta field when `enable-api-fields` is stable")
-			}
-
-			ctx = cfgtesting.EnableBetaAPIFields(context.Background())
-			if err := task.Validate(ctx); err != nil {
-				t.Errorf("unexpected error when using beta field: %s", err)
-			}
-		})
 	}
 }
 
@@ -2253,161 +2626,165 @@ func TestGetArrayIndexParamRefs(t *testing.T) {
 		name     string
 		taskspec *v1.TaskSpec
 		want     sets.String
-	}{{
-		name: "steps reference",
-		taskspec: &v1.TaskSpec{
-			Params: []v1.ParamSpec{{
-				Name:    "array-params",
-				Default: v1.NewStructuredValues("bar", "foo"),
-			}},
-			Steps: []v1.Step{{
-				Name:    "$(params.array-params[10])",
-				Image:   "$(params.array-params[11])",
-				Command: []string{"$(params.array-params[12])"},
-				Args:    []string{"$(params.array-params[13])"},
-				Script:  "echo $(params.array-params[14])",
-				Env: []corev1.EnvVar{{
-					Value: "$(params.array-params[15])",
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							Key: "$(params.array-params[16])",
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "$(params.array-params[17])",
-							},
-						},
-						ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-							Key: "$(params.array-params[18])",
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "$(params.array-params[19])",
-							},
-						},
-					},
+	}{
+		{
+			name: "steps reference",
+			taskspec: &v1.TaskSpec{
+				Params: []v1.ParamSpec{{
+					Name:    "array-params",
+					Default: v1.NewStructuredValues("bar", "foo"),
 				}},
-				EnvFrom: []corev1.EnvFromSource{{
-					Prefix: "$(params.array-params[20])",
-					ConfigMapRef: &corev1.ConfigMapEnvSource{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: "$(params.array-params[21])",
-						},
-					},
-					SecretRef: &corev1.SecretEnvSource{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: "$(params.array-params[22])",
-						},
-					},
-				}},
-				WorkingDir: "$(params.array-params[23])",
-				VolumeMounts: []corev1.VolumeMount{{
-					Name:      "$(params.array-params[24])",
-					MountPath: "$(params.array-params[25])",
-					SubPath:   "$(params.array-params[26])",
-				}},
-			}},
-			StepTemplate: &v1.StepTemplate{
-				Image: "$(params.array-params[27])",
-			},
-		},
-		want: sets.NewString("$(params.array-params[10])", "$(params.array-params[11])", "$(params.array-params[12])", "$(params.array-params[13])", "$(params.array-params[14])",
-			"$(params.array-params[15])", "$(params.array-params[16])", "$(params.array-params[17])", "$(params.array-params[18])", "$(params.array-params[19])", "$(params.array-params[20])",
-			"$(params.array-params[21])", "$(params.array-params[22])", "$(params.array-params[23])", "$(params.array-params[24])", "$(params.array-params[25])", "$(params.array-params[26])", "$(params.array-params[27])"),
-	}, {
-		name: "stepTemplate reference",
-		taskspec: &v1.TaskSpec{
-			Params: []v1.ParamSpec{{
-				Name:    "array-params",
-				Default: v1.NewStructuredValues("bar", "foo"),
-			}},
-			StepTemplate: &v1.StepTemplate{
-				Image: "$(params.array-params[3])",
-			},
-		},
-		want: sets.NewString("$(params.array-params[3])"),
-	}, {
-		name: "volumes references",
-		taskspec: &v1.TaskSpec{
-			Params: []v1.ParamSpec{{
-				Name:    "array-params",
-				Default: v1.NewStructuredValues("bar", "foo"),
-			}},
-			Volumes: []corev1.Volume{{
-				Name: "$(params.array-params[10])",
-				VolumeSource: corev1.VolumeSource{
-					ConfigMap: &corev1.ConfigMapVolumeSource{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: "$(params.array-params[11])",
-						},
-						Items: []corev1.KeyToPath{{
-							Key:  "$(params.array-params[12])",
-							Path: "$(params.array-params[13])",
-						},
-						},
-					},
-					Secret: &corev1.SecretVolumeSource{
-						SecretName: "$(params.array-params[14])",
-						Items: []corev1.KeyToPath{{
-							Key:  "$(params.array-params[15])",
-							Path: "$(params.array-params[16])",
-						}},
-					},
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: "$(params.array-params[17])",
-					},
-					Projected: &corev1.ProjectedVolumeSource{
-						Sources: []corev1.VolumeProjection{{
-							ConfigMap: &corev1.ConfigMapProjection{
+				Steps: []v1.Step{{
+					Name:    "$(params.array-params[10])",
+					Image:   "$(params.array-params[11])",
+					Command: []string{"$(params.array-params[12])"},
+					Args:    []string{"$(params.array-params[13])"},
+					Script:  "echo $(params.array-params[14])",
+					Env: []corev1.EnvVar{{
+						Value: "$(params.array-params[15])",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								Key: "$(params.array-params[16])",
 								LocalObjectReference: corev1.LocalObjectReference{
-									Name: "$(params.array-params[18])",
+									Name: "$(params.array-params[17])",
 								},
 							},
-							Secret: &corev1.SecretProjection{
+							ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+								Key: "$(params.array-params[18])",
 								LocalObjectReference: corev1.LocalObjectReference{
 									Name: "$(params.array-params[19])",
 								},
 							},
-							ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
-								Audience: "$(params.array-params[20])",
-							},
-						}},
-					},
-					CSI: &corev1.CSIVolumeSource{
-						NodePublishSecretRef: &corev1.LocalObjectReference{
-							Name: "$(params.array-params[21])",
 						},
-						VolumeAttributes: map[string]string{"key": "$(params.array-params[22])"},
+					}},
+					EnvFrom: []corev1.EnvFromSource{{
+						Prefix: "$(params.array-params[20])",
+						ConfigMapRef: &corev1.ConfigMapEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "$(params.array-params[21])",
+							},
+						},
+						SecretRef: &corev1.SecretEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "$(params.array-params[22])",
+							},
+						},
+					}},
+					WorkingDir: "$(params.array-params[23])",
+					VolumeMounts: []corev1.VolumeMount{{
+						Name:      "$(params.array-params[24])",
+						MountPath: "$(params.array-params[25])",
+						SubPath:   "$(params.array-params[26])",
+					}},
+				}},
+				StepTemplate: &v1.StepTemplate{
+					Image: "$(params.array-params[27])",
+				},
+			},
+			want: sets.NewString("$(params.array-params[10])", "$(params.array-params[11])", "$(params.array-params[12])", "$(params.array-params[13])", "$(params.array-params[14])",
+				"$(params.array-params[15])", "$(params.array-params[16])", "$(params.array-params[17])", "$(params.array-params[18])", "$(params.array-params[19])", "$(params.array-params[20])",
+				"$(params.array-params[21])", "$(params.array-params[22])", "$(params.array-params[23])", "$(params.array-params[24])", "$(params.array-params[25])", "$(params.array-params[26])", "$(params.array-params[27])"),
+		}, {
+			name: "stepTemplate reference",
+			taskspec: &v1.TaskSpec{
+				Params: []v1.ParamSpec{{
+					Name:    "array-params",
+					Default: v1.NewStructuredValues("bar", "foo"),
+				}},
+				StepTemplate: &v1.StepTemplate{
+					Image: "$(params.array-params[3])",
+				},
+			},
+			want: sets.NewString("$(params.array-params[3])"),
+		}, {
+			name: "volumes references",
+			taskspec: &v1.TaskSpec{
+				Params: []v1.ParamSpec{{
+					Name:    "array-params",
+					Default: v1.NewStructuredValues("bar", "foo"),
+				}},
+				Volumes: []corev1.Volume{
+					{
+						Name: "$(params.array-params[10])",
+						VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: "$(params.array-params[11])",
+								},
+								Items: []corev1.KeyToPath{
+									{
+										Key:  "$(params.array-params[12])",
+										Path: "$(params.array-params[13])",
+									},
+								},
+							},
+							Secret: &corev1.SecretVolumeSource{
+								SecretName: "$(params.array-params[14])",
+								Items: []corev1.KeyToPath{{
+									Key:  "$(params.array-params[15])",
+									Path: "$(params.array-params[16])",
+								}},
+							},
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "$(params.array-params[17])",
+							},
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{{
+									ConfigMap: &corev1.ConfigMapProjection{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "$(params.array-params[18])",
+										},
+									},
+									Secret: &corev1.SecretProjection{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "$(params.array-params[19])",
+										},
+									},
+									ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+										Audience: "$(params.array-params[20])",
+									},
+								}},
+							},
+							CSI: &corev1.CSIVolumeSource{
+								NodePublishSecretRef: &corev1.LocalObjectReference{
+									Name: "$(params.array-params[21])",
+								},
+								VolumeAttributes: map[string]string{"key": "$(params.array-params[22])"},
+							},
+						},
 					},
 				},
 			},
+			want: sets.NewString("$(params.array-params[10])", "$(params.array-params[11])", "$(params.array-params[12])", "$(params.array-params[13])", "$(params.array-params[14])",
+				"$(params.array-params[15])", "$(params.array-params[16])", "$(params.array-params[17])", "$(params.array-params[18])", "$(params.array-params[19])", "$(params.array-params[20])",
+				"$(params.array-params[21])", "$(params.array-params[22])"),
+		}, {
+			name: "workspaces references",
+			taskspec: &v1.TaskSpec{
+				Params: []v1.ParamSpec{{
+					Name:    "array-params",
+					Default: v1.NewStructuredValues("bar", "foo"),
+				}},
+				Workspaces: []v1.WorkspaceDeclaration{{
+					MountPath: "$(params.array-params[3])",
+				}},
 			},
-		},
-		want: sets.NewString("$(params.array-params[10])", "$(params.array-params[11])", "$(params.array-params[12])", "$(params.array-params[13])", "$(params.array-params[14])",
-			"$(params.array-params[15])", "$(params.array-params[16])", "$(params.array-params[17])", "$(params.array-params[18])", "$(params.array-params[19])", "$(params.array-params[20])",
-			"$(params.array-params[21])", "$(params.array-params[22])"),
-	}, {
-		name: "workspaces references",
-		taskspec: &v1.TaskSpec{
-			Params: []v1.ParamSpec{{
-				Name:    "array-params",
-				Default: v1.NewStructuredValues("bar", "foo"),
-			}},
-			Workspaces: []v1.WorkspaceDeclaration{{
-				MountPath: "$(params.array-params[3])",
-			}},
-		},
-		want: sets.NewString("$(params.array-params[3])"),
-	}, {
-		name: "sidecar references",
-		taskspec: &v1.TaskSpec{
-			Params: []v1.ParamSpec{{
-				Name:    "array-params",
-				Default: v1.NewStructuredValues("bar", "foo"),
-			}},
-			Sidecars: []v1.Sidecar{{
-				Script: "$(params.array-params[3])",
+			want: sets.NewString("$(params.array-params[3])"),
+		}, {
+			name: "sidecar references",
+			taskspec: &v1.TaskSpec{
+				Params: []v1.ParamSpec{{
+					Name:    "array-params",
+					Default: v1.NewStructuredValues("bar", "foo"),
+				}},
+				Sidecars: []v1.Sidecar{
+					{
+						Script: "$(params.array-params[3])",
+					},
+				},
 			},
-			},
+			want: sets.NewString("$(params.array-params[3])"),
 		},
-		want: sets.NewString("$(params.array-params[3])"),
-	},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2477,7 +2854,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("param default value v4 not in the enum list: params[param1]"),
+		expectedErr: errors.New("param default value v4 not in the enum list: params[param1]"),
 	}, {
 		name: "param enum with array type - failure",
 		params: []v1.ParamSpec{{
@@ -2488,7 +2865,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("enum can only be set with string type param: params[param1]"),
+		expectedErr: errors.New("enum can only be set with string type param: params[param1]"),
 	}, {
 		name: "param enum with object type - failure",
 		params: []v1.ParamSpec{{
@@ -2499,7 +2876,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("enum can only be set with string type param: params[param1]"),
+		expectedErr: errors.New("enum can only be set with string type param: params[param1]"),
 	}, {
 		name: "param enum with duplicate values - failure",
 		params: []v1.ParamSpec{{
@@ -2510,7 +2887,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("parameter enum value v1 appears more than once: params[param1]"),
+		expectedErr: errors.New("parameter enum value v1 appears more than once: params[param1]"),
 	}, {
 		name: "param enum with feature flag disabled - failure",
 		params: []v1.ParamSpec{{
@@ -2521,7 +2898,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "false",
 		},
-		expectedErr: fmt.Errorf("feature flag `enable-param-enum` should be set to true to use Enum: params[param1]"),
+		expectedErr: errors.New("feature flag `enable-param-enum` should be set to true to use Enum: params[param1]"),
 	}}
 
 	for _, tc := range tcs {
@@ -2745,6 +3122,88 @@ func TestTaskSpecValidate_StepResults_Error(t *testing.T) {
 			}
 			ts.SetDefaults(ctx)
 			err := ts.Validate(ctx)
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("StepActionSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestTaskSpecValidate_StepWhen_Error(t *testing.T) {
+	tests := []struct {
+		name             string
+		ts               *v1.TaskSpec
+		isCreate         bool
+		Results          []v1.StepResult
+		isUpdate         bool
+		baselineTaskRun  *v1.TaskRun
+		expectedError    apis.FieldError
+		EnableStepAction bool
+		EnableCEL        bool
+	}{
+		{
+			name: "step when not allowed without enable step actions - create event",
+			ts: &v1.TaskSpec{Steps: []v1.Step{{
+				Image: "my-image",
+				When:  v1.StepWhenExpressions{{Input: "foo", Operator: selection.In, Values: []string{"foo"}}},
+			}}},
+			isCreate: true,
+			expectedError: apis.FieldError{
+				Message: "feature flag enable-step-actions should be set to true in order to use When in Steps.",
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "step when not allowed without enable step actions - update and diverged event",
+			ts: &v1.TaskSpec{Steps: []v1.Step{{
+				Image: "my-image",
+				When:  v1.StepWhenExpressions{{Input: "foo", Operator: selection.In, Values: []string{"foo"}}},
+			}}},
+			isUpdate: true,
+			baselineTaskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					TaskSpec: &v1.TaskSpec{
+						Steps: []v1.Step{{
+							Image:   "my-image",
+							Results: []v1.StepResult{{Name: "a-result"}},
+						}},
+					},
+				},
+			},
+			expectedError: apis.FieldError{
+				Message: "feature flag enable-step-actions should be set to true in order to use When in Steps.",
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "cel not allowed if EnableCELInWhenExpression is false",
+			ts: &v1.TaskSpec{Steps: []v1.Step{{
+				Image: "my-image",
+				When:  v1.StepWhenExpressions{{CEL: "'d'=='d'"}},
+			}}},
+			EnableStepAction: true,
+			expectedError: apis.FieldError{
+				Message: `feature flag enable-cel-in-whenexpression should be set to true to use CEL: 'd'=='d' in WhenExpression`,
+				Paths:   []string{"steps[0].when[0]"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions:         tt.EnableStepAction,
+					EnableCELInWhenExpression: tt.EnableCEL,
+				},
+			})
+			if tt.isCreate {
+				ctx = apis.WithinCreate(ctx)
+			}
+			if tt.isUpdate {
+				ctx = apis.WithinUpdate(ctx, tt.baselineTaskRun)
+			}
+			tt.ts.SetDefaults(ctx)
+			err := tt.ts.Validate(ctx)
 			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
 				t.Errorf("StepActionSpec.Validate() errors diff %s", diff.PrintWantGot(d))
 			}

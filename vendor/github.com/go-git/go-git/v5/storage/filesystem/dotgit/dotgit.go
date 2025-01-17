@@ -10,18 +10,19 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/hash"
 	"github.com/go-git/go-git/v5/storage"
 	"github.com/go-git/go-git/v5/utils/ioutil"
 
 	"github.com/go-git/go-billy/v5"
+	"github.com/go-git/go-billy/v5/helper/chroot"
 )
 
 const (
@@ -71,6 +72,9 @@ var (
 	// ErrIsDir is returned when a reference file is attempting to be read,
 	// but the path specified is a directory.
 	ErrIsDir = errors.New("reference path is a directory")
+	// ErrEmptyRefFile is returned when a reference file is attempted to be read,
+	// but the file is empty
+	ErrEmptyRefFile = errors.New("ref file is empty")
 )
 
 // Options holds configuration for the storage.
@@ -81,6 +85,10 @@ type Options struct {
 	// KeepDescriptors makes the file descriptors to be reused but they will
 	// need to be manually closed calling Close().
 	KeepDescriptors bool
+	// AlternatesFS provides the billy filesystem to be used for Git Alternates.
+	// If none is provided, it falls back to using the underlying instance used for
+	// DotGit.
+	AlternatesFS billy.Filesystem
 }
 
 // The DotGit type represents a local git repository on disk. This
@@ -244,7 +252,7 @@ func (d *DotGit) objectPacks() ([]plumbing.Hash, error) {
 			continue
 		}
 
-		h := plumbing.NewHash(n[5 : len(n)-5]) //pack-(hash).pack
+		h := plumbing.NewHash(n[5 : len(n)-5]) // pack-(hash).pack
 		if h.IsZero() {
 			// Ignore files with badly-formatted names.
 			continue
@@ -656,18 +664,33 @@ func (d *DotGit) readReferenceFrom(rd io.Reader, name string) (ref *plumbing.Ref
 		return nil, err
 	}
 
+	if len(b) == 0 {
+		return nil, ErrEmptyRefFile
+	}
+
 	line := strings.TrimSpace(string(b))
 	return plumbing.NewReferenceFromStrings(name, line), nil
 }
 
+// checkReferenceAndTruncate reads the reference from the given file, or the `pack-refs` file if
+// the file was empty. Then it checks that the old reference matches the stored reference and
+// truncates the file.
 func (d *DotGit) checkReferenceAndTruncate(f billy.File, old *plumbing.Reference) error {
 	if old == nil {
 		return nil
 	}
+
 	ref, err := d.readReferenceFrom(f, old.Name().String())
+	if errors.Is(err, ErrEmptyRefFile) {
+		// This may happen if the reference is being read from a newly created file.
+		// In that case, try getting the reference from the packed refs file.
+		ref, err = d.packedRef(old.Name())
+	}
+
 	if err != nil {
 		return err
 	}
+
 	if ref.Hash() != old.Hash() {
 		return storage.ErrReferenceHasChanged
 	}
@@ -696,16 +719,16 @@ func (d *DotGit) SetRef(r, old *plumbing.Reference) error {
 // Symbolic references are resolved and included in the output.
 func (d *DotGit) Refs() ([]*plumbing.Reference, error) {
 	var refs []*plumbing.Reference
-	var seen = make(map[plumbing.ReferenceName]bool)
+	seen := make(map[plumbing.ReferenceName]bool)
+	if err := d.addRefFromHEAD(&refs); err != nil {
+		return nil, err
+	}
+
 	if err := d.addRefsFromRefDir(&refs, seen); err != nil {
 		return nil, err
 	}
 
 	if err := d.addRefsFromPackedRefs(&refs, seen); err != nil {
-		return nil, err
-	}
-
-	if err := d.addRefFromHEAD(&refs); err != nil {
 		return nil, err
 	}
 
@@ -810,7 +833,8 @@ func (d *DotGit) addRefsFromPackedRefsFile(refs *[]*plumbing.Reference, f billy.
 }
 
 func (d *DotGit) openAndLockPackedRefs(doCreate bool) (
-	pr billy.File, err error) {
+	pr billy.File, err error,
+) {
 	var f billy.File
 	defer func() {
 		if err != nil && f != nil {
@@ -1015,7 +1039,7 @@ func (d *DotGit) readReferenceFile(path, name string) (ref *plumbing.Reference, 
 
 func (d *DotGit) CountLooseRefs() (int, error) {
 	var refs []*plumbing.Reference
-	var seen = make(map[plumbing.ReferenceName]bool)
+	seen := make(map[plumbing.ReferenceName]bool)
 	if err := d.addRefsFromRefDir(&refs, seen); err != nil {
 		return 0, err
 	}
@@ -1146,28 +1170,55 @@ func (d *DotGit) Alternates() ([]*DotGit, error) {
 	}
 	defer f.Close()
 
+	fs := d.options.AlternatesFS
+	if fs == nil {
+		fs = d.fs
+	}
+
 	var alternates []*DotGit
+	seen := make(map[string]struct{})
 
 	// Read alternate paths line-by-line and create DotGit objects.
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		path := scanner.Text()
-		if !filepath.IsAbs(path) {
-			// For relative paths, we can perform an internal conversion to
-			// slash so that they work cross-platform.
-			slashPath := filepath.ToSlash(path)
-			// If the path is not absolute, it must be relative to object
-			// database (.git/objects/info).
-			// https://www.kernel.org/pub/software/scm/git/docs/gitrepository-layout.html
-			// Hence, derive a path relative to DotGit's root.
-			// "../../../reponame/.git/" -> "../../reponame/.git"
-			// Remove the first ../
-			relpath := filepath.Join(strings.Split(slashPath, "/")[1:]...)
-			normalPath := filepath.FromSlash(relpath)
-			path = filepath.Join(d.fs.Root(), normalPath)
+
+		// Avoid creating multiple dotgits for the same alternative path.
+		if _, ok := seen[path]; ok {
+			continue
 		}
-		fs := osfs.New(filepath.Dir(path))
-		alternates = append(alternates, New(fs))
+
+		seen[path] = struct{}{}
+
+		if filepath.IsAbs(path) {
+			// Handling absolute paths should be straight-forward. However, the default osfs (Chroot)
+			// tries to concatenate an abs path with the root path in some operations (e.g. Stat),
+			// which leads to unexpected errors. Therefore, make the path relative to the current FS instead.
+			if reflect.TypeOf(fs) == reflect.TypeOf(&chroot.ChrootHelper{}) {
+				path, err = filepath.Rel(fs.Root(), path)
+				if err != nil {
+					return nil, fmt.Errorf("cannot make path %q relative: %w", path, err)
+				}
+			}
+		} else {
+			// By Git conventions, relative paths should be based on the object database (.git/objects/info)
+			// location as per: https://www.kernel.org/pub/software/scm/git/docs/gitrepository-layout.html
+			// However, due to the nature of go-git and its filesystem handling via Billy, paths cannot
+			// cross its "chroot boundaries". Therefore, ignore any "../" and treat the path from the
+			// fs root. If this is not correct based on the dotgit fs, set a different one via AlternatesFS.
+			abs := filepath.Join(string(filepath.Separator), filepath.ToSlash(path))
+			path = filepath.FromSlash(abs)
+		}
+
+		// Aligns with upstream behavior: exit if target path is not a valid directory.
+		if fi, err := fs.Stat(path); err != nil || !fi.IsDir() {
+			return nil, fmt.Errorf("invalid object directory %q: %w", path, err)
+		}
+		afs, err := fs.Chroot(filepath.Dir(path))
+		if err != nil {
+			return nil, fmt.Errorf("cannot chroot %q: %w", path, err)
+		}
+		alternates = append(alternates, New(afs))
 	}
 
 	if err = scanner.Err(); err != nil {

@@ -31,6 +31,8 @@ installation.
     - [Verify the transparency logs using `rekor-cli`](#verify-the-transparency-logs-using-rekor-cli)
   - [Verify Tekton Resources](#verify-tekton-resources)
   - [Pipelinerun with Affinity Assistant](#pipelineruns-with-affinity-assistant)
+  - [TaskRuns with `imagePullBackOff` Timeout](#taskruns-with-imagepullbackoff-timeout)
+  - [Disabling Inline Spec in TaskRun and PipelineRun](#disabling-inline-spec-in-taskrun-and-pipelinerun)
   - [Next steps](#next-steps)
 
 
@@ -163,6 +165,69 @@ spec:
 _In the above example the environment variable `TEST_TEKTON` will not be overriden by value specified in podTemplate, because the `config-default` option `default-forbidden-env` is configured with value `TEST_TEKTON`._
 
 
+## Configuring default resources requirements
+
+Resource requirements of containers created by the controller can be assigned default values. This allows to fully control the resources requirement of `TaskRun`.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-defaults
+  namespace: tekton-pipelines
+data:
+  default-container-resource-requirements: |
+    place-scripts: # updates resource requirements of a 'place-scripts' container
+      requests:
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "128Mi"
+        cpu: "500m"
+  
+    prepare: # updates resource requirements of a 'prepare' container
+      requests:
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+  
+    working-dir-initializer: # updates resource requirements of a 'working-dir-initializer' container
+      requests:
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+  
+    prefix-scripts: # updates resource requirements of containers which starts with 'scripts-'
+      requests:
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "128Mi"
+        cpu: "500m"
+  
+    prefix-sidecar-scripts: # updates resource requirements of containers which starts with 'sidecar-scripts-'
+      requests:
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "128Mi"
+        cpu: "500m"
+  
+    default: # updates resource requirements of init-containers and containers which has empty resource resource requirements
+      requests:
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+```
+
+Any resource requirements set at the `Task` and `TaskRun` levels will overidde the default one specified in the `config-defaults` configmap.
+
 ## Customizing basic execution parameters
 
 You can specify your own values that replace the default service account (`ServiceAccount`), timeout (`Timeout`), resolver (`Resolver`), and Pod template (`PodTemplate`) values used by Tekton Pipelines in `TaskRun` and `PipelineRun` definitions. To do so, modify the ConfigMap `config-defaults` with your desired values.
@@ -172,7 +237,7 @@ The example below customizes the following:
 - the default service account from `default` to `tekton`.
 - the default timeout from 60 minutes to 20 minutes.
 - the default `app.kubernetes.io/managed-by` label is applied to all Pods created to execute `TaskRuns`.
-- the default Pod template to include a node selector to select the node where the Pod will be scheduled by default. A list of supported fields is available [here](https://github.com/tektoncd/pipeline/blob/main/docs/podtemplates.md#supported-fields).
+- the default Pod template to include a node selector to select the node where the Pod will be scheduled by default. A list of supported fields is available [here](./podtemplates.md#supported-fields).
   For more information, see [`PodTemplate` in `TaskRuns`](./taskruns.md#specifying-a-pod-template) or [`PodTemplate` in `PipelineRuns`](./pipelineruns.md#specifying-a-pod-template).
 - the default `Workspace` configuration can be set for any `Workspaces` that a Task declares but that a TaskRun does not explicitly provide.
 - the default maximum combinations of `Parameters` in a `Matrix` that can be used to fan out a `PipelineTask`. For
@@ -268,6 +333,8 @@ enables [beta features](#beta-features). When using v1 APIs, setting this field 
 allows only stable features, and setting it to "beta" allows only beta features.
 Set this field to "alpha" to allow [alpha features](#alpha-features) to be used.
 
+- `enable-kubernetes-sidecar`: Set this flag to `"true"` to enable native kubernetes sidecar support. This will allow Tekton sidecars to run as Kubernetes sidecars. Must be using Kubernetes v1.29 or greater.
+
 For example:
 
 ```yaml
@@ -310,17 +377,13 @@ Features currently in "alpha" are:
 | [Hermetic Execution Mode](./hermetic.md)                                                                     | [TEP-0025](https://github.com/tektoncd/community/blob/main/teps/0025-hermekton.md)                                   | [v0.25.0](https://github.com/tektoncd/pipeline/releases/tag/v0.25.0) |                                                  |
 | [Windows Scripts](./tasks.md#windows-scripts)                                                                | [TEP-0057](https://github.com/tektoncd/community/blob/main/teps/0057-windows-support.md)                             | [v0.28.0](https://github.com/tektoncd/pipeline/releases/tag/v0.28.0) |                                                  |
 | [Debug](./debug.md)                                                                                          | [TEP-0042](https://github.com/tektoncd/community/blob/main/teps/0042-taskrun-breakpoint-on-failure.md)               | [v0.26.0](https://github.com/tektoncd/pipeline/releases/tag/v0.26.0) |                                                  |
-| [Step and Sidecar Overrides](./taskruns.md#overriding-task-steps-and-sidecars)                               | [TEP-0094](https://github.com/tektoncd/community/blob/main/teps/0094-specifying-resource-requirements-at-runtime.md) | [v0.34.0](https://github.com/tektoncd/pipeline/releases/tag/v0.34.0) |                                                  |
-| [StdoutConfig and StderrConfig](./tasks#redirecting-step-output-streams-with-stdoutConfig-and-stderrConfig)) | [TEP-0011](https://github.com/tektoncd/community/blob/main/teps/0011-redirecting-step-output-streams.md)             | [v0.38.0](https://github.com/tektoncd/pipeline/releases/tag/v0.38.0) |                                                  |
+| [StdoutConfig and StderrConfig](./tasks#redirecting-step-output-streams-with-stdoutConfig-and-stderrConfig) | [TEP-0011](https://github.com/tektoncd/community/blob/main/teps/0011-redirecting-step-output-streams.md)             | [v0.38.0](https://github.com/tektoncd/pipeline/releases/tag/v0.38.0) |                                                  |
 | [Trusted Resources](./trusted-resources.md)                                                                  | [TEP-0091](https://github.com/tektoncd/community/blob/main/teps/0091-trusted-resources.md)                           | [v0.49.0](https://github.com/tektoncd/pipeline/releases/tag/v0.49.0) | `trusted-resources-verification-no-match-policy` |
-| [Larger Results via Sidecar Logs](#enabling-larger-results-using-sidecar-logs)                               | [TEP-0127](https://github.com/tektoncd/community/blob/main/teps/0127-larger-results-via-sidecar-logs.md)             | [v0.43.0](https://github.com/tektoncd/pipeline/releases/tag/v0.43.0) | `results-from`                                   |
 | [Configure Default Resolver](./resolution.md#configuring-built-in-resolvers)                                 | [TEP-0133](https://github.com/tektoncd/community/blob/main/teps/0133-configure-default-resolver.md)                  | [v0.46.0](https://github.com/tektoncd/pipeline/releases/tag/v0.46.0) |                                                  |
 | [Coschedule](./affinityassistants.md)                                                                        | [TEP-0135](https://github.com/tektoncd/community/blob/main/teps/0135-coscheduling-pipelinerun-pods.md)               | [v0.51.0](https://github.com/tektoncd/pipeline/releases/tag/v0.51.0) | `coschedule`                                     |
 | [keep pod on cancel](./taskruns.md#cancelling-a-taskrun)                                                     | N/A                                                                                                                  | [v0.52.0](https://github.com/tektoncd/pipeline/releases/tag/v0.52.0) | `keep-pod-on-cancel`                             |
-| [CEL in WhenExpression](./taskruns.md#cancelling-a-taskrun)                                                  | [TEP-0145](https://github.com/tektoncd/community/blob/main/teps/0145-cel-in-whenexpression.md)                       | [v0.53.0](https://github.com/tektoncd/pipeline/releases/tag/v0.53.0) | `enable-cel-in-whenexpression`                   |
+| [CEL in WhenExpression](./pipelines.md#use-cel-expression-in-whenexpression)                                                  | [TEP-0145](https://github.com/tektoncd/community/blob/main/teps/0145-cel-in-whenexpression.md)                       | [v0.53.0](https://github.com/tektoncd/pipeline/releases/tag/v0.53.0) | `enable-cel-in-whenexpression`                   |
 | [Param Enum](./taskruns.md#parameter-enums)                                                                  | [TEP-0144](https://github.com/tektoncd/community/blob/main/teps/0144-param-enum.md)                                  | [v0.54.0](https://github.com/tektoncd/pipeline/releases/tag/v0.54.0) | `enable-param-enum`                              |
-| [Reusable Steps via StepActions](./stepactions.md)                                                           | [TEP-0142](https://github.com/tektoncd/community/blob/main/teps/0142-enable-step-reusability.md)                     | [v0.54.0](https://github.com/tektoncd/pipeline/releases/tag/v0.54.0) | `enable-step-actions`                            |
-| [Ignore Task Failure](./pipelines.md#using-the-onerror-field)                                                | [TEP-0050](https://github.com/tektoncd/community/blob/main/teps/0050-ignore-task-failures.md)                        | N/A                                                                  |                                                  |
 
 ### Beta Features
 
@@ -333,13 +396,15 @@ Features currently in "beta" are:
 
 | Feature                                                                                               | Proposal                                                                                                 | Alpha Release                                                        | Beta Release                                                         | Individual Flag               |
 |:------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------|:---------------------------------------------------------------------|:------------------------------|
-| [Array Results and Array Indexing](pipelineruns.md#specifying-parameters)                             | [TEP-0076](https://github.com/tektoncd/community/blob/main/teps/0076-array-result-types.md)              | [v0.38.0](https://github.com/tektoncd/pipeline/releases/tag/v0.38.0) | [v0.45.0](https://github.com/tektoncd/pipeline/releases/tag/v0.45.0) |                               |
-| [Object Parameters and Results](pipelineruns.md#specifying-parameters)                                | [TEP-0075](https://github.com/tektoncd/community/blob/main/teps/0075-object-param-and-result-types.md)   |                                                                      | [v0.46.0](https://github.com/tektoncd/pipeline/releases/tag/v0.46.0) |                               |
 | [Remote Tasks](./taskruns.md#remote-tasks) and [Remote Pipelines](./pipelineruns.md#remote-pipelines) | [TEP-0060](https://github.com/tektoncd/community/blob/main/teps/0060-remote-resolution.md)               |                                                                      | [v0.41.0](https://github.com/tektoncd/pipeline/releases/tag/v0.41.0) |                               |
 | [`Provenance` field in Status](pipeline-api.md#provenance)                                            | [issue#5550](https://github.com/tektoncd/pipeline/issues/5550)                                           | [v0.41.0](https://github.com/tektoncd/pipeline/releases/tag/v0.41.0) | [v0.48.0](https://github.com/tektoncd/pipeline/releases/tag/v0.48.0) | `enable-provenance-in-status` |
 | [Isolated `Step` & `Sidecar` `Workspaces`](./workspaces.md#isolated-workspaces)                       | [TEP-0029](https://github.com/tektoncd/community/blob/main/teps/0029-step-workspaces.md)                 | [v0.24.0](https://github.com/tektoncd/pipeline/releases/tag/v0.24.0) | [v0.50.0](https://github.com/tektoncd/pipeline/releases/tag/v0.50.0) |                               |
 | [Matrix](./matrix.md)                                                                                 | [TEP-0090](https://github.com/tektoncd/community/blob/main/teps/0090-matrix.md)                          | [v0.38.0](https://github.com/tektoncd/pipeline/releases/tag/v0.38.0) | [v0.53.0](https://github.com/tektoncd/pipeline/releases/tag/v0.53.0) |                               |
 | [Task-level Resource Requirements](compute-resources.md#task-level-compute-resources-configuration)   | [TEP-0104](https://github.com/tektoncd/community/blob/main/teps/0104-tasklevel-resource-requirements.md) | [v0.39.0](https://github.com/tektoncd/pipeline/releases/tag/v0.39.0) | [v0.53.0](https://github.com/tektoncd/pipeline/releases/tag/v0.53.0) |                               |
+| [Reusable Steps via StepActions](./stepactions.md)                                                           | [TEP-0142](https://github.com/tektoncd/community/blob/main/teps/0142-enable-step-reusability.md)                     | [v0.54.0](https://github.com/tektoncd/pipeline/releases/tag/v0.54.0) | `enable-step-actions`                            |
+| [Larger Results via Sidecar Logs](#enabling-larger-results-using-sidecar-logs)                               | [TEP-0127](https://github.com/tektoncd/community/blob/main/teps/0127-larger-results-via-sidecar-logs.md)             | [v0.43.0](https://github.com/tektoncd/pipeline/releases/tag/v0.43.0) | [v0.61.0](https://github.com/tektoncd/pipeline/releases/tag/v0.61.0) | `results-from`                                   |
+| [Step and Sidecar Overrides](./taskruns.md#overriding-task-steps-and-sidecars)                               | [TEP-0094](https://github.com/tektoncd/community/blob/main/teps/0094-specifying-resource-requirements-at-runtime.md) | [v0.34.0](https://github.com/tektoncd/pipeline/releases/tag/v0.34.0) |                                                  | [v0.61.0](https://github.com/tektoncd/pipeline/releases/tag/v0.61.0)  | |
+| [Ignore Task Failure](./pipelines.md#using-the-onerror-field)                                                | [TEP-0050](https://github.com/tektoncd/community/blob/main/teps/0050-ignore-task-failures.md)                        |    [v0.55.0](https://github.com/tektoncd/pipeline/releases/tag/v0.55.0)                                                              | [v0.62.0](https://github.com/tektoncd/pipeline/releases/tag/v0.62.0)                                                 | N/A |
 
 ## Enabling larger results using sidecar logs
 
@@ -396,7 +461,8 @@ Out-of-the-box, Tekton Pipelines Controller is configured for relatively small-s
 
 To allow TaskRuns and PipelineRuns to run in namespaces with [restricted pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/),
 set the "set-security-context" feature flag to "true" in the [feature-flags configMap](#customizing-the-pipelines-controller-behavior). This configuration option applies a [SecurityContext](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/)
-to any containers injected into TaskRuns by the Pipelines controller. This SecurityContext may not be supported in all Kubernetes implementations (for example, OpenShift).
+to any containers injected into TaskRuns by the Pipelines controller. If the [Affinity Assistants](affinityassistants.md) feature is enabled, the SecurityContext is also applied to those containers.
+This SecurityContext may not be supported in all Kubernetes implementations (for example, OpenShift).
 
 **Note**: running TaskRuns and PipelineRuns in the "tekton-pipelines" namespace is discouraged.
 
@@ -611,6 +677,52 @@ please take a look at [Trusted Resources](./trusted-resources.md).
 The cluster operators can review the [guidelines](developers/affinity-assistant.md) to `cordon` a node in the cluster
 with the tekton controller and the affinity assistant is enabled.
 
+## TaskRuns with `imagePullBackOff` Timeout
+
+Tekton pipelines has adopted a fail fast strategy with a taskRun failing with `TaskRunImagePullFailed` in case of an
+`imagePullBackOff`. This can be limited in some cases, and it generally depends on the infrastructure. To allow the
+cluster operators to decide whether to wait in case of an `imagePullBackOff`, a setting is available to configure
+the wait time such that the controller will wait for the specified duration before declaring a failure.
+For example, with the following `config-defaults`, the controller does not mark the taskRun as failure for 5 minutes since
+the pod is scheduled in case the image pull fails with `imagePullBackOff`. The `default-imagepullbackoff-timeout` is
+of type `time.Duration` and can be set to a duration such as "1m", "5m", "10s", "1h", etc.
+See issue https://github.com/tektoncd/pipeline/issues/5987 for more details.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-defaults
+  namespace: tekton-pipelines
+data:
+  default-imagepullbackoff-timeout: "5m"
+```
+
+## Disabling Inline Spec in Pipeline, TaskRun and PipelineRun
+
+Tekton users may embed the specification of a `Task` (via `taskSpec`) or a `Pipeline` (via `pipelineSpec`) as an alternative to referring to an external resource via `taskRef` and `pipelineRef` respectively.  This behaviour can be selectively disabled for three Tekton resources: `TaskRun`, `PipelineRun` and `Pipeline`.
+
+ In certain clusters and scenarios, an admin might want to disable the customisation of `Tasks` and `Pipelines` and only allow users to run pre-defined resources. To achieve that the admin should disable embedded specification via the `disable-inline-spec` flag, and remote resolvers too.
+
+To disable inline specification, set the `disable-inline-spec` flag to `"pipeline,pipelinerun,taskrun"`
+in the `feature-flags` configmap.
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feature-flags
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+data:
+  disable-inline-spec: "pipeline,pipelinerun,taskrun"
+```
+
+Inline specifications can be disabled for specific resources only. To achieve that, set the disable-inline-spec flag to a comma-separated list of the desired resources. Valid values are pipeline, pipelinerun and taskrun.
+
+The default value of disable-inline-spec is "", which means inline specification is enabled in all cases.
+
 ## Next steps
 
 To get started with Tekton check the [Introductory tutorials][quickstarts],
@@ -624,5 +736,8 @@ Except as otherwise noted, the content of this page is licensed under the
 under the [Apache 2.0 License][apache2l].
 {{% /comment %}}
 
+[quickstarts]: https://tekton.dev/docs/getting-started/
+[howtos]: https://tekton.dev/docs/how-to-guides/
+[examples]: https://github.com/tektoncd/pipeline/tree/main/examples/
 [cca4]: https://creativecommons.org/licenses/by/4.0/
 [apache2l]: https://www.apache.org/licenses/LICENSE-2.0

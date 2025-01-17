@@ -111,7 +111,7 @@ spec:
         steps:
         - args: ['-c', 'echo $(input-result-from-custom-task-ref) $(input-result-from-custom-task-spec)']
           command: ['/bin/bash']
-          image: ubuntu
+          image: mirror.gcr.io/ubuntu
 `, pipelineRunName, betaAPIVersion, kind, betaAPIVersion, kind, customTaskRawSpec)),
 		metav1.CreateOptions{}); err != nil {
 		t.Fatalf("Failed to create PipelineRun %q: %v", pipelineRunName, err)
@@ -348,7 +348,7 @@ spec:
 		t.Errorf("Error waiting for PipelineRun %s to finish: %s", pipelineRun.Name, err)
 	}
 
-	customRunList, err := c.V1beta1CustomRunClient.List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("tekton.dev/pipelineRun=%s", pipelineRun.Name)})
+	customRunList, err := c.V1beta1CustomRunClient.List(ctx, metav1.ListOptions{LabelSelector: "tekton.dev/pipelineRun=" + pipelineRun.Name})
 	if err != nil {
 		t.Fatalf("Error listing Runs for PipelineRun %s: %s", pipelineRun.Name, err)
 	}

@@ -27,7 +27,7 @@ import (
 	goversion "github.com/hashicorp/go-version"
 	resolverconfig "github.com/tektoncd/pipeline/pkg/apis/config/resolver"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	"github.com/tektoncd/pipeline/pkg/resolution/common"
+	common "github.com/tektoncd/pipeline/pkg/resolution/common"
 	"github.com/tektoncd/pipeline/pkg/resolution/resolver/framework"
 )
 
@@ -46,6 +46,8 @@ const (
 )
 
 // Resolver implements a framework.Resolver that can fetch files from OCI bundles.
+//
+// Deprecated: Use [github.com/tektoncd/pipeline/pkg/remoteresolution/resolver/hub.Resolver] instead.
 type Resolver struct {
 	// TektonHubURL is the URL for hub resolver with type tekton
 	TektonHubURL string
@@ -77,7 +79,11 @@ func (r *Resolver) GetSelector(context.Context) map[string]string {
 
 // ValidateParams ensures parameters from a request are as expected.
 func (r *Resolver) ValidateParams(ctx context.Context, params []pipelinev1.Param) error {
-	if r.isDisabled(ctx) {
+	return ValidateParams(ctx, params, r.TektonHubURL)
+}
+
+func ValidateParams(ctx context.Context, params []pipelinev1.Param, tektonHubUrl string) error {
+	if isDisabled(ctx) {
 		return errors.New(disabledError)
 	}
 
@@ -85,7 +91,7 @@ func (r *Resolver) ValidateParams(ctx context.Context, params []pipelinev1.Param
 	if err != nil {
 		return fmt.Errorf("failed to populate default params: %w", err)
 	}
-	if err := r.validateParams(ctx, paramsMap); err != nil {
+	if err := validateParams(ctx, paramsMap, tektonHubUrl); err != nil {
 		return fmt.Errorf("failed to validate params: %w", err)
 	}
 
@@ -110,7 +116,11 @@ type artifactHubResponse struct {
 
 // Resolve uses the given params to resolve the requested file or resource.
 func (r *Resolver) Resolve(ctx context.Context, params []pipelinev1.Param) (framework.ResolvedResource, error) {
-	if r.isDisabled(ctx) {
+	return Resolve(ctx, params, r.TektonHubURL, r.ArtifactHubURL)
+}
+
+func Resolve(ctx context.Context, params []pipelinev1.Param, tektonHubURL, artifactHubURL string) (framework.ResolvedResource, error) {
+	if isDisabled(ctx) {
 		return nil, errors.New(disabledError)
 	}
 
@@ -118,12 +128,12 @@ func (r *Resolver) Resolve(ctx context.Context, params []pipelinev1.Param) (fram
 	if err != nil {
 		return nil, fmt.Errorf("failed to populate default params: %w", err)
 	}
-	if err := r.validateParams(ctx, paramsMap); err != nil {
+	if err := validateParams(ctx, paramsMap, tektonHubURL); err != nil {
 		return nil, fmt.Errorf("failed to validate params: %w", err)
 	}
 
 	if constraint, err := goversion.NewConstraint(paramsMap[ParamVersion]); err == nil {
-		chosen, err := r.resolveVersionConstraint(ctx, paramsMap, constraint)
+		chosen, err := resolveVersionConstraint(ctx, paramsMap, constraint, artifactHubURL, tektonHubURL)
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +149,7 @@ func (r *Resolver) Resolve(ctx context.Context, params []pipelinev1.Param) (fram
 	// call hub API
 	switch paramsMap[ParamType] {
 	case ArtifactHubType:
-		url := fmt.Sprintf(fmt.Sprintf("%s/%s", r.ArtifactHubURL, ArtifactHubYamlEndpoint),
+		url := fmt.Sprintf(fmt.Sprintf("%s/%s", artifactHubURL, ArtifactHubYamlEndpoint),
 			paramsMap[ParamKind], paramsMap[ParamCatalog], paramsMap[ParamName], paramsMap[ParamVersion])
 		resp := artifactHubResponse{}
 		if err := fetchHubResource(ctx, url, &resp); err != nil {
@@ -150,7 +160,7 @@ func (r *Resolver) Resolve(ctx context.Context, params []pipelinev1.Param) (fram
 			Content: []byte(resp.Data.YAML),
 		}, nil
 	case TektonHubType:
-		url := fmt.Sprintf(fmt.Sprintf("%s/%s", r.TektonHubURL, TektonHubYamlEndpoint),
+		url := fmt.Sprintf(fmt.Sprintf("%s/%s", tektonHubURL, TektonHubYamlEndpoint),
 			paramsMap[ParamCatalog], paramsMap[ParamKind], paramsMap[ParamName], paramsMap[ParamVersion])
 		resp := tektonHubResponse{}
 		if err := fetchHubResource(ctx, url, &resp); err != nil {
@@ -198,7 +208,7 @@ func (rr *ResolvedHubResource) RefSource() *pipelinev1.RefSource {
 	}
 }
 
-func (r *Resolver) isDisabled(ctx context.Context) bool {
+func isDisabled(ctx context.Context) bool {
 	cfg := resolverconfig.FromContextOrDefaults(ctx)
 	return !cfg.FeatureFlags.EnableHubResolver
 }
@@ -237,13 +247,13 @@ func resolveCatalogName(paramsMap, conf map[string]string) (string, error) {
 	var ok bool
 
 	if configTHCatalog, ok = conf[ConfigTektonHubCatalog]; !ok {
-		return "", fmt.Errorf("default Tekton Hub catalog was not set during installation of the hub resolver")
+		return "", errors.New("default Tekton Hub catalog was not set during installation of the hub resolver")
 	}
 	if configAHTaskCatalog, ok = conf[ConfigArtifactHubTaskCatalog]; !ok {
-		return "", fmt.Errorf("default Artifact Hub task catalog was not set during installation of the hub resolver")
+		return "", errors.New("default Artifact Hub task catalog was not set during installation of the hub resolver")
 	}
 	if configAHPipelineCatalog, ok = conf[ConfigArtifactHubPipelineCatalog]; !ok {
-		return "", fmt.Errorf("default Artifact Hub pipeline catalog was not set during installation of the hub resolver")
+		return "", errors.New("default Artifact Hub pipeline catalog was not set during installation of the hub resolver")
 	}
 	if _, ok := paramsMap[ParamCatalog]; !ok {
 		switch paramsMap[ParamType] {
@@ -288,10 +298,92 @@ type tektonHubListResult struct {
 	Data tektonHubListDataResult `json:"data"`
 }
 
-func (r *Resolver) resolveVersionConstraint(ctx context.Context, paramsMap map[string]string, constraint goversion.Constraints) (*goversion.Version, error) {
+// the Artifact Hub follows the semVer (i.e. <major-version>.<minor-version>.0)
+// the Tekton Hub follows the simplified semVer (i.e. <major-version>.<minor-version>)
+// for resolution request with "artifact" type, we append ".0" suffix if the input version is simplified semVer
+// for resolution request with "tekton" type, we only use <major-version>.<minor-version> part of the input if it is semVer
+func resolveVersion(version, hubType string) (string, error) {
+	semVer := strings.Split(version, ".")
+	resVer := version
+
+	if hubType == ArtifactHubType && len(semVer) == 2 {
+		resVer = version + ".0"
+	} else if hubType == TektonHubType && len(semVer) > 2 {
+		resVer = strings.Join(semVer[0:2], ".")
+	}
+
+	return resVer, nil
+}
+
+func populateDefaultParams(ctx context.Context, params []pipelinev1.Param) (map[string]string, error) {
+	conf := framework.GetResolverConfigFromContext(ctx)
+	paramsMap := make(map[string]string)
+	for _, p := range params {
+		paramsMap[p.Name] = p.Value.StringVal
+	}
+
+	// type
+	if _, ok := paramsMap[ParamType]; !ok {
+		if typeString, ok := conf[ConfigType]; ok {
+			paramsMap[ParamType] = typeString
+		} else {
+			return nil, errors.New("default type was not set during installation of the hub resolver")
+		}
+	}
+
+	// kind
+	if _, ok := paramsMap[ParamKind]; !ok {
+		if kindString, ok := conf[ConfigKind]; ok {
+			paramsMap[ParamKind] = kindString
+		} else {
+			return nil, errors.New("default resource kind was not set during installation of the hub resolver")
+		}
+	}
+
+	// catalog
+	resCatName, err := resolveCatalogName(paramsMap, conf)
+	if err != nil {
+		return nil, err
+	}
+	paramsMap[ParamCatalog] = resCatName
+
+	return paramsMap, nil
+}
+
+func validateParams(ctx context.Context, paramsMap map[string]string, tektonHubURL string) error {
+	var missingParams []string
+	if _, ok := paramsMap[ParamName]; !ok {
+		missingParams = append(missingParams, ParamName)
+	}
+	if _, ok := paramsMap[ParamVersion]; !ok {
+		missingParams = append(missingParams, ParamVersion)
+	}
+	if kind, ok := paramsMap[ParamKind]; ok {
+		if kind != "task" && kind != "pipeline" {
+			return errors.New("kind param must be task or pipeline")
+		}
+	}
+	if hubType, ok := paramsMap[ParamType]; ok {
+		if hubType != ArtifactHubType && hubType != TektonHubType {
+			return fmt.Errorf("type param must be %s or %s", ArtifactHubType, TektonHubType)
+		}
+
+		if hubType == TektonHubType && tektonHubURL == "" {
+			return errors.New("please configure TEKTON_HUB_API env variable to use tekton type")
+		}
+	}
+
+	if len(missingParams) > 0 {
+		return fmt.Errorf("missing required hub resolver params: %s", strings.Join(missingParams, ", "))
+	}
+
+	return nil
+}
+
+func resolveVersionConstraint(ctx context.Context, paramsMap map[string]string, constraint goversion.Constraints, artifactHubURL, tektonHubURL string) (*goversion.Version, error) {
 	var ret *goversion.Version
 	if paramsMap[ParamType] == ArtifactHubType {
-		allVersionsURL := fmt.Sprintf("%s/%s", r.ArtifactHubURL, fmt.Sprintf(
+		allVersionsURL := fmt.Sprintf("%s/%s", artifactHubURL, fmt.Sprintf(
 			ArtifactHubListTasksEndpoint,
 			paramsMap[ParamKind], paramsMap[ParamCatalog], paramsMap[ParamName]))
 		resp := artifactHubListResult{}
@@ -318,7 +410,7 @@ func (r *Resolver) resolveVersionConstraint(ctx context.Context, paramsMap map[s
 			}
 		}
 	} else if paramsMap[ParamType] == TektonHubType {
-		allVersionsURL := fmt.Sprintf("%s/%s", r.TektonHubURL,
+		allVersionsURL := fmt.Sprintf("%s/%s", tektonHubURL,
 			fmt.Sprintf(TektonHubListTasksEndpoint,
 				paramsMap[ParamCatalog], paramsMap[ParamKind], paramsMap[ParamName]))
 		resp := tektonHubListResult{}
@@ -346,86 +438,4 @@ func (r *Resolver) resolveVersionConstraint(ctx context.Context, paramsMap map[s
 		return nil, fmt.Errorf("no version found for constraint %s", paramsMap[ParamVersion])
 	}
 	return ret, nil
-}
-
-// the Artifact Hub follows the semVer (i.e. <major-version>.<minor-version>.0)
-// the Tekton Hub follows the simplified semVer (i.e. <major-version>.<minor-version>)
-// for resolution request with "artifact" type, we append ".0" suffix if the input version is simplified semVer
-// for resolution request with "tekton" type, we only use <major-version>.<minor-version> part of the input if it is semVer
-func resolveVersion(version, hubType string) (string, error) {
-	semVer := strings.Split(version, ".")
-	resVer := version
-
-	if hubType == ArtifactHubType && len(semVer) == 2 {
-		resVer = version + ".0"
-	} else if hubType == TektonHubType && len(semVer) > 2 {
-		resVer = strings.Join(semVer[0:2], ".")
-	}
-
-	return resVer, nil
-}
-
-func (r *Resolver) validateParams(ctx context.Context, paramsMap map[string]string) error {
-	var missingParams []string
-	if _, ok := paramsMap[ParamName]; !ok {
-		missingParams = append(missingParams, ParamName)
-	}
-	if _, ok := paramsMap[ParamVersion]; !ok {
-		missingParams = append(missingParams, ParamVersion)
-	}
-	if kind, ok := paramsMap[ParamKind]; ok {
-		if kind != "task" && kind != "pipeline" {
-			return errors.New("kind param must be task or pipeline")
-		}
-	}
-	if hubType, ok := paramsMap[ParamType]; ok {
-		if hubType != ArtifactHubType && hubType != TektonHubType {
-			return fmt.Errorf(fmt.Sprintf("type param must be %s or %s", ArtifactHubType, TektonHubType))
-		}
-
-		if hubType == TektonHubType && r.TektonHubURL == "" {
-			return fmt.Errorf("please configure TEKTON_HUB_API env variable to use tekton type")
-		}
-	}
-
-	if len(missingParams) > 0 {
-		return fmt.Errorf("missing required hub resolver params: %s", strings.Join(missingParams, ", "))
-	}
-
-	return nil
-}
-
-func populateDefaultParams(ctx context.Context, params []pipelinev1.Param) (map[string]string, error) {
-	conf := framework.GetResolverConfigFromContext(ctx)
-	paramsMap := make(map[string]string)
-	for _, p := range params {
-		paramsMap[p.Name] = p.Value.StringVal
-	}
-
-	// type
-	if _, ok := paramsMap[ParamType]; !ok {
-		if typeString, ok := conf[ConfigType]; ok {
-			paramsMap[ParamType] = typeString
-		} else {
-			return nil, fmt.Errorf("default type was not set during installation of the hub resolver")
-		}
-	}
-
-	// kind
-	if _, ok := paramsMap[ParamKind]; !ok {
-		if kindString, ok := conf[ConfigKind]; ok {
-			paramsMap[ParamKind] = kindString
-		} else {
-			return nil, fmt.Errorf("default resource kind was not set during installation of the hub resolver")
-		}
-	}
-
-	// catalog
-	resCatName, err := resolveCatalogName(paramsMap, conf)
-	if err != nil {
-		return nil, err
-	}
-	paramsMap[ParamCatalog] = resCatName
-
-	return paramsMap, nil
 }

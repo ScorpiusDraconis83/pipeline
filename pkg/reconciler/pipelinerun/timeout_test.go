@@ -60,6 +60,23 @@ func TestTimeoutPipelineRun(t *testing.T) {
 			{ObjectMeta: metav1.ObjectMeta{Name: "t1"}},
 		},
 	}, {
+		name: "multiple-runs-missing",
+		pipelineRun: &v1.PipelineRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pipeline-run-timedout"},
+			Spec:       v1.PipelineRunSpec{},
+			Status: v1.PipelineRunStatus{PipelineRunStatusFields: v1.PipelineRunStatusFields{
+				ChildReferences: []v1.ChildStatusReference{{
+					TypeMeta:         runtime.TypeMeta{Kind: taskRun},
+					Name:             "t1",
+					PipelineTaskName: "task-1",
+				}, {
+					TypeMeta:         runtime.TypeMeta{Kind: customRun},
+					Name:             "t2",
+					PipelineTaskName: "task-2",
+				}},
+			}},
+		},
+	}, {
 		name: "multiple-taskruns",
 		pipelineRun: &v1.PipelineRun{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-pipeline-run-timedout"},
@@ -228,7 +245,6 @@ func TestTimeoutPipelineRun(t *testing.T) {
 		wantErr: true,
 	}}
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			d := test.Data{
 				PipelineRuns: []*v1.PipelineRun{tc.pipelineRun},

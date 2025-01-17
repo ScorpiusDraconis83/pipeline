@@ -1,5 +1,6 @@
 # ![pipe](./pipe.png) Tekton Pipelines
 
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![Go Report Card](https://goreportcard.com/badge/tektoncd/pipeline)](https://goreportcard.com/report/tektoncd/pipeline)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/4020/badge)](https://bestpractices.coreinfrastructure.org/projects/4020)
 
@@ -42,6 +43,8 @@ Tekton Pipelines are **Typed**:
 - Starting from the v0.41.x release of Tekton: **Kubernetes version 1.23 or later**
 - Starting from the v0.45.x release of Tekton: **Kubernetes version 1.24 or later**
 - Starting from the v0.51.x release of Tekton: **Kubernetes version 1.25 or later**
+- Starting from the v0.59.x release of Tekton: **Kubernetes version 1.27 or later**
+- Starting from the v0.61.x release of Tekton: **Kubernetes version 1.28 or later**
 
 ### Read the docs
 

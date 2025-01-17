@@ -44,7 +44,7 @@ var (
 	completionTime = metav1.NewTime(startTime.Time.Add(time.Minute))
 )
 
-func getConfigContext(countWithReason bool) context.Context {
+func getConfigContext(countWithReason, throttleWithNamespace bool) context.Context {
 	ctx := context.Background()
 	cfg := &config.Config{
 		Metrics: &config.Metrics{
@@ -53,6 +53,7 @@ func getConfigContext(countWithReason bool) context.Context {
 			DurationTaskrunType:     config.DefaultDurationTaskrunType,
 			DurationPipelinerunType: config.DefaultDurationPipelinerunType,
 			CountWithReason:         countWithReason,
+			ThrottleWithNamespace:   throttleWithNamespace,
 		},
 	}
 	return config.ToContext(ctx, cfg)
@@ -79,19 +80,19 @@ func TestUninitializedMetrics(t *testing.T) {
 	}
 }
 
-func TestMetricsOnStore(t *testing.T) {
+func TestOnStore(t *testing.T) {
 	log := zap.NewExample()
 	defer log.Sync()
 	logger := log.Sugar()
 
-	ctx := getConfigContext(false)
+	ctx := getConfigContext(false, false)
 	metrics, err := NewRecorder(ctx)
 	if err != nil {
 		t.Fatalf("NewRecorder: %v", err)
 	}
 
 	// We check that there's no change when incorrect config is passed
-	MetricsOnStore(logger)(config.GetMetricsConfigName(), &config.Store{})
+	OnStore(logger, metrics)(config.GetMetricsConfigName(), &config.Store{})
 	// Comparing function assign to struct with the one which should yield same value
 	if reflect.ValueOf(metrics.insertTaskTag).Pointer() != reflect.ValueOf(taskrunInsertTag).Pointer() {
 		t.Fatalf("metrics recorder shouldn't change during this OnStore call")
@@ -106,7 +107,7 @@ func TestMetricsOnStore(t *testing.T) {
 	}
 
 	// We test that there's no change when incorrect values in configmap is passed
-	MetricsOnStore(logger)(config.GetMetricsConfigName(), cfg)
+	OnStore(logger, metrics)(config.GetMetricsConfigName(), cfg)
 	// Comparing function assign to struct with the one which should yield same value
 	if reflect.ValueOf(metrics.insertTaskTag).Pointer() != reflect.ValueOf(taskrunInsertTag).Pointer() {
 		t.Fatalf("metrics recorder shouldn't change during this OnStore call")
@@ -120,7 +121,7 @@ func TestMetricsOnStore(t *testing.T) {
 		DurationPipelinerunType: config.DurationPipelinerunTypeLastValue,
 	}
 
-	MetricsOnStore(logger)(config.GetMetricsConfigName(), cfg)
+	OnStore(logger, metrics)(config.GetMetricsConfigName(), cfg)
 	if reflect.ValueOf(metrics.insertTaskTag).Pointer() != reflect.ValueOf(nilInsertTag).Pointer() {
 		t.Fatalf("metrics recorder didn't change during OnStore call")
 	}
@@ -143,6 +144,78 @@ func TestRecordTaskRunDurationCount(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "taskrun-1", Namespace: "ns"},
 			Spec: v1.TaskRunSpec{
 				TaskRef: &v1.TaskRef{Name: "task-1"},
+			},
+			Status: v1.TaskRunStatus{
+				Status: duckv1.Status{
+					Conditions: duckv1.Conditions{{
+						Type:   apis.ConditionSucceeded,
+						Status: corev1.ConditionTrue,
+					}},
+				},
+				TaskRunStatusFields: v1.TaskRunStatusFields{
+					StartTime:      &startTime,
+					CompletionTime: &completionTime,
+				},
+			},
+		},
+		metricName: "taskrun_duration_seconds",
+		expectedDurationTags: map[string]string{
+			"task":      "task-1",
+			"taskrun":   "taskrun-1",
+			"namespace": "ns",
+			"status":    "success",
+		},
+		expectedCountTags: map[string]string{
+			"status": "success",
+		},
+		expectedDuration: 60,
+		expectedCount:    1,
+		beforeCondition:  nil,
+		countWithReason:  false,
+	}, {
+		name: "for succeeded taskrun ref cluster task",
+		taskRun: &v1.TaskRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "taskrun-1", Namespace: "ns", Labels: map[string]string{
+				pipeline.PipelineTaskLabelKey: "task-1",
+			}},
+			Spec: v1.TaskRunSpec{
+				TaskSpec: &v1.TaskSpec{},
+			},
+			Status: v1.TaskRunStatus{
+				Status: duckv1.Status{
+					Conditions: duckv1.Conditions{{
+						Type:   apis.ConditionSucceeded,
+						Status: corev1.ConditionTrue,
+					}},
+				},
+				TaskRunStatusFields: v1.TaskRunStatusFields{
+					StartTime:      &startTime,
+					CompletionTime: &completionTime,
+				},
+			},
+		},
+		metricName: "taskrun_duration_seconds",
+		expectedDurationTags: map[string]string{
+			"task":      "task-1",
+			"taskrun":   "taskrun-1",
+			"namespace": "ns",
+			"status":    "success",
+		},
+		expectedCountTags: map[string]string{
+			"status": "success",
+		},
+		expectedDuration: 60,
+		expectedCount:    1,
+		beforeCondition:  nil,
+		countWithReason:  false,
+	}, {
+		name: "for succeeded taskrun create by pipelinerun",
+		taskRun: &v1.TaskRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "taskrun-1", Namespace: "ns", Labels: map[string]string{
+				pipeline.ClusterTaskLabelKey: "task-1",
+			}},
+			Spec: v1.TaskRunSpec{
+				TaskRef: &v1.TaskRef{Kind: v1.ClusterTaskRefKind},
 			},
 			Status: v1.TaskRunStatus{
 				Status: duckv1.Status{
@@ -273,6 +346,50 @@ func TestRecordTaskRunDurationCount(t *testing.T) {
 		beforeCondition:  nil,
 		countWithReason:  false,
 	}, {
+		name: "for failed taskrun with reference remote task",
+		taskRun: &v1.TaskRun{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "taskrun-1",
+				Namespace: "ns",
+				Labels: map[string]string{
+					pipeline.TaskLabelKey: "task-remote",
+				},
+			},
+			Spec: v1.TaskRunSpec{
+				TaskRef: &v1.TaskRef{
+					ResolverRef: v1.ResolverRef{
+						Resolver: "git",
+					},
+				},
+			},
+			Status: v1.TaskRunStatus{
+				Status: duckv1.Status{
+					Conditions: duckv1.Conditions{{
+						Type:   apis.ConditionSucceeded,
+						Status: corev1.ConditionFalse,
+					}},
+				},
+				TaskRunStatusFields: v1.TaskRunStatusFields{
+					StartTime:      &startTime,
+					CompletionTime: &completionTime,
+				},
+			},
+		},
+		metricName: "taskrun_duration_seconds",
+		expectedDurationTags: map[string]string{
+			"task":      "task-remote",
+			"taskrun":   "taskrun-1",
+			"namespace": "ns",
+			"status":    "failed",
+		},
+		expectedCountTags: map[string]string{
+			"status": "failed",
+		},
+		expectedDuration: 60,
+		expectedCount:    1,
+		beforeCondition:  nil,
+		countWithReason:  false,
+	}, {
 		name: "for succeeded taskrun in pipelinerun",
 		taskRun: &v1.TaskRun{
 			ObjectMeta: metav1.ObjectMeta{
@@ -390,6 +507,7 @@ func TestRecordTaskRunDurationCount(t *testing.T) {
 			"task":        "task-1",
 			"taskrun":     "taskrun-1",
 			"namespace":   "ns",
+			"reason":      "TaskRunImagePullFailed",
 			"status":      "failed",
 		},
 		expectedCountTags: map[string]string{
@@ -404,7 +522,7 @@ func TestRecordTaskRunDurationCount(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			unregisterMetrics()
 
-			ctx := getConfigContext(c.countWithReason)
+			ctx := getConfigContext(c.countWithReason, false)
 			metrics, err := NewRecorder(ctx)
 			if err != nil {
 				t.Fatalf("NewRecorder: %v", err)
@@ -415,8 +533,11 @@ func TestRecordTaskRunDurationCount(t *testing.T) {
 			}
 			if c.expectedCountTags != nil {
 				metricstest.CheckCountData(t, "taskrun_count", c.expectedCountTags, c.expectedCount)
+				delete(c.expectedCountTags, "reason")
+				metricstest.CheckCountData(t, "taskrun_total", c.expectedCountTags, c.expectedCount)
 			} else {
 				metricstest.CheckStatsNotReported(t, "taskrun_count")
+				metricstest.CheckStatsNotReported(t, "taskrun_total")
 			}
 			if c.expectedDurationTags != nil {
 				metricstest.CheckLastValueData(t, c.metricName, c.expectedDurationTags, c.expectedDuration)
@@ -456,7 +577,7 @@ func TestRecordRunningTaskRunsCount(t *testing.T) {
 		}
 	}
 
-	ctx = getConfigContext(false)
+	ctx = getConfigContext(false, false)
 	metrics, err := NewRecorder(ctx)
 	if err != nil {
 		t.Fatalf("NewRecorder: %v", err)
@@ -476,6 +597,7 @@ func TestRecordRunningTaskRunsThrottledCounts(t *testing.T) {
 		nodeCount  float64
 		quotaCount float64
 		waitCount  float64
+		addNS      bool
 	}{
 		{
 			status: corev1.ConditionTrue,
@@ -487,7 +609,17 @@ func TestRecordRunningTaskRunsThrottledCounts(t *testing.T) {
 		},
 		{
 			status: corev1.ConditionTrue,
+			reason: pod.ReasonExceededResourceQuota,
+			addNS:  true,
+		},
+		{
+			status: corev1.ConditionTrue,
 			reason: pod.ReasonExceededNodeResources,
+		},
+		{
+			status: corev1.ConditionTrue,
+			reason: pod.ReasonExceededNodeResources,
+			addNS:  true,
 		},
 		{
 			status: corev1.ConditionTrue,
@@ -524,6 +656,18 @@ func TestRecordRunningTaskRunsThrottledCounts(t *testing.T) {
 			nodeCount: 3,
 		},
 		{
+			status:     corev1.ConditionUnknown,
+			reason:     pod.ReasonExceededResourceQuota,
+			quotaCount: 3,
+			addNS:      true,
+		},
+		{
+			status:    corev1.ConditionUnknown,
+			reason:    pod.ReasonExceededNodeResources,
+			nodeCount: 3,
+			addNS:     true,
+		},
+		{
 			status:    corev1.ConditionUnknown,
 			reason:    v1.TaskRunReasonResolvingTaskRef,
 			waitCount: 3,
@@ -532,9 +676,9 @@ func TestRecordRunningTaskRunsThrottledCounts(t *testing.T) {
 		unregisterMetrics()
 		ctx, _ := ttesting.SetupFakeContext(t)
 		informer := faketaskruninformer.Get(ctx)
-		for i := 0; i < multiplier; i++ {
+		for range multiplier {
 			tr := &v1.TaskRun{
-				ObjectMeta: metav1.ObjectMeta{Name: names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("taskrun-")},
+				ObjectMeta: metav1.ObjectMeta{Name: names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("taskrun-"), Namespace: "test"},
 				Status: v1.TaskRunStatus{
 					Status: duckv1.Status{
 						Conditions: duckv1.Conditions{{
@@ -550,7 +694,7 @@ func TestRecordRunningTaskRunsThrottledCounts(t *testing.T) {
 			}
 		}
 
-		ctx = getConfigContext(false)
+		ctx = getConfigContext(false, tc.addNS)
 		metrics, err := NewRecorder(ctx)
 		if err != nil {
 			t.Fatalf("NewRecorder: %v", err)
@@ -560,7 +704,13 @@ func TestRecordRunningTaskRunsThrottledCounts(t *testing.T) {
 			t.Errorf("RunningTaskRuns: %v", err)
 		}
 		metricstest.CheckLastValueData(t, "running_taskruns_throttled_by_quota_count", map[string]string{}, tc.quotaCount)
+		nsMap := map[string]string{}
+		if tc.addNS {
+			nsMap = map[string]string{namespaceTag.Name(): "test"}
+		}
+		metricstest.CheckLastValueData(t, "running_taskruns_throttled_by_quota", nsMap, tc.quotaCount)
 		metricstest.CheckLastValueData(t, "running_taskruns_throttled_by_node_count", map[string]string{}, tc.nodeCount)
+		metricstest.CheckLastValueData(t, "running_taskruns_throttled_by_node", nsMap, tc.nodeCount)
 		metricstest.CheckLastValueData(t, "running_taskruns_waiting_on_task_resolution_count", map[string]string{}, tc.waitCount)
 	}
 }
@@ -574,12 +724,38 @@ func TestRecordPodLatency(t *testing.T) {
 			TaskRef: &v1.TaskRef{Name: "task-1"},
 		},
 	}
+	trFromRemoteTask := &v1.TaskRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-taskrun",
+			Namespace: "foo",
+			Labels: map[string]string{
+				pipeline.TaskLabelKey: "task-remote",
+			},
+		},
+		Spec: v1.TaskRunSpec{
+			TaskRef: &v1.TaskRef{
+				ResolverRef: v1.ResolverRef{Resolver: "task-remote"},
+			},
+		},
+	}
+	emptyLabelTRFromRemoteTask := &v1.TaskRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-taskrun",
+			Namespace: "foo",
+		},
+		Spec: v1.TaskRunSpec{
+			TaskRef: &v1.TaskRef{
+				ResolverRef: v1.ResolverRef{Resolver: "task-remote"},
+			},
+		},
+	}
 	for _, td := range []struct {
 		name           string
 		pod            *corev1.Pod
 		expectedTags   map[string]string
 		expectedValue  float64
 		expectingError bool
+		taskRun        *v1.TaskRun
 	}{{
 		name: "for scheduled pod",
 		pod: &corev1.Pod{
@@ -602,6 +778,53 @@ func TestRecordPodLatency(t *testing.T) {
 			"namespace": "foo",
 		},
 		expectedValue: 4000,
+		taskRun:       taskRun,
+	}, {
+		name: "for scheduled pod with reference remote task",
+		pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "test-taskrun-pod-123456",
+				Namespace:         "foo",
+				CreationTimestamp: creationTime,
+			},
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{{
+					Type:               corev1.PodScheduled,
+					LastTransitionTime: metav1.Time{Time: creationTime.Add(4 * time.Second)},
+				}},
+			},
+		},
+		expectedTags: map[string]string{
+			"pod":       "test-taskrun-pod-123456",
+			"task":      "task-remote",
+			"taskrun":   "test-taskrun",
+			"namespace": "foo",
+		},
+		expectedValue: 4000,
+		taskRun:       trFromRemoteTask,
+	}, {
+		name: "for scheduled pod - empty label tr reference remote task",
+		pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "test-taskrun-pod-123456",
+				Namespace:         "foo",
+				CreationTimestamp: creationTime,
+			},
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{{
+					Type:               corev1.PodScheduled,
+					LastTransitionTime: metav1.Time{Time: creationTime.Add(4 * time.Second)},
+				}},
+			},
+		},
+		expectedTags: map[string]string{
+			"pod":       "test-taskrun-pod-123456",
+			"task":      anonymous,
+			"taskrun":   "test-taskrun",
+			"namespace": "foo",
+		},
+		expectedValue: 4000,
+		taskRun:       emptyLabelTRFromRemoteTask,
 	}, {
 		name: "for non scheduled pod",
 		pod: &corev1.Pod{
@@ -613,17 +836,18 @@ func TestRecordPodLatency(t *testing.T) {
 			Status: corev1.PodStatus{},
 		},
 		expectingError: true,
+		taskRun:        taskRun,
 	}} {
 		t.Run(td.name, func(t *testing.T) {
 			unregisterMetrics()
 
-			ctx := getConfigContext(false)
+			ctx := getConfigContext(false, false)
 			metrics, err := NewRecorder(ctx)
 			if err != nil {
 				t.Fatalf("NewRecorder: %v", err)
 			}
 
-			if err := metrics.RecordPodLatency(ctx, td.pod, taskRun); td.expectingError && err == nil {
+			if err := metrics.RecordPodLatency(ctx, td.pod, td.taskRun); td.expectingError && err == nil {
 				t.Error("RecordPodLatency wanted error, got nil")
 			} else if !td.expectingError {
 				if err != nil {
@@ -680,7 +904,7 @@ func TestTaskRunIsOfPipelinerun(t *testing.T) {
 }
 
 func unregisterMetrics() {
-	metricstest.Unregister("taskrun_duration_seconds", "pipelinerun_taskrun_duration_seconds", "taskrun_count", "running_taskruns_count", "running_taskruns_throttled_by_quota_count", "running_taskruns_throttled_by_node_count", "running_taskruns_waiting_on_task_resolution_count", "taskruns_pod_latency_milliseconds")
+	metricstest.Unregister("taskrun_duration_seconds", "pipelinerun_taskrun_duration_seconds", "taskrun_count", "running_taskruns_count", "running_taskruns_throttled_by_quota_count", "running_taskruns_throttled_by_node_count", "running_taskruns_waiting_on_task_resolution_count", "taskruns_pod_latency_milliseconds", "taskrun_total", "running_taskruns", "running_taskruns_throttled_by_quota", "running_taskruns_throttled_by_node", "running_taskruns_waiting_on_task_resolution")
 
 	// Allow the recorder singleton to be recreated.
 	once = sync.Once{}

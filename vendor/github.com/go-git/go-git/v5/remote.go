@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-billy/v5/osfs"
+
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/internal/url"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -82,7 +83,7 @@ func (r *Remote) String() string {
 	var fetch, push string
 	if len(r.c.URLs) > 0 {
 		fetch = r.c.URLs[0]
-		push = r.c.URLs[0]
+		push = r.c.URLs[len(r.c.URLs)-1]
 	}
 
 	return fmt.Sprintf("%s\t%s (fetch)\n%[1]s\t%[3]s (push)", r.c.Name, fetch, push)
@@ -109,8 +110,8 @@ func (r *Remote) PushContext(ctx context.Context, o *PushOptions) (err error) {
 		return fmt.Errorf("remote names don't match: %s != %s", o.RemoteName, r.c.Name)
 	}
 
-	if o.RemoteURL == "" {
-		o.RemoteURL = r.c.URLs[0]
+	if o.RemoteURL == "" && len(r.c.URLs) > 0 {
+		o.RemoteURL = r.c.URLs[len(r.c.URLs)-1]
 	}
 
 	s, err := newSendPackSession(o.RemoteURL, o.Auth, o.InsecureSkipTLS, o.CABundle, o.ProxyOptions)
@@ -470,6 +471,14 @@ func (r *Remote) fetch(ctx context.Context, o *FetchOptions) (sto storer.Referen
 		}
 	}
 
+	var updatedPrune bool
+	if o.Prune {
+		updatedPrune, err = r.pruneRemotes(o.RefSpecs, localRefs, remoteRefs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	updated, err := r.updateLocalReferenceStorage(o.RefSpecs, refs, remoteRefs, specToRefs, o.Tags, o.Force)
 	if err != nil {
 		return nil, err
@@ -482,8 +491,19 @@ func (r *Remote) fetch(ctx context.Context, o *FetchOptions) (sto storer.Referen
 		}
 	}
 
-	if !updated {
-		return remoteRefs, NoErrAlreadyUpToDate
+	if !updated && !updatedPrune {
+		// No references updated, but may have fetched new objects, check if we now have any of our wants
+		for _, hash := range req.Wants {
+			exists, _ := objectExists(r.s, hash)
+			if exists {
+				updated = true
+				break
+			}
+		}
+
+		if !updated {
+			return remoteRefs, NoErrAlreadyUpToDate
+		}
 	}
 
 	return remoteRefs, nil
@@ -552,6 +572,10 @@ func (r *Remote) fetchPack(ctx context.Context, o *FetchOptions, s transport.Upl
 
 	reader, err := s.UploadPack(ctx, req)
 	if err != nil {
+		if errors.Is(err, transport.ErrEmptyUploadPackRequest) {
+			// XXX: no packfile provided, everything is up-to-date.
+			return nil
+		}
 		return err
 	}
 
@@ -568,6 +592,27 @@ func (r *Remote) fetchPack(ctx context.Context, o *FetchOptions, s transport.Upl
 	}
 
 	return err
+}
+
+func (r *Remote) pruneRemotes(specs []config.RefSpec, localRefs []*plumbing.Reference, remoteRefs memory.ReferenceStorage) (bool, error) {
+	var updatedPrune bool
+	for _, spec := range specs {
+		rev := spec.Reverse()
+		for _, ref := range localRefs {
+			if !rev.Match(ref.Name()) {
+				continue
+			}
+			_, err := remoteRefs.Reference(rev.Dst(ref.Name()))
+			if errors.Is(err, plumbing.ErrReferenceNotFound) {
+				updatedPrune = true
+				err := r.s.RemoveReference(ref.Name())
+				if err != nil {
+					return false, err
+				}
+			}
+		}
+	}
+	return updatedPrune, nil
 }
 
 func (r *Remote) addReferencesToUpdate(
@@ -845,17 +890,12 @@ func getHavesFromRef(
 		return nil
 	}
 
-	// No need to load the commit if we know the remote already
-	// has this hash.
-	if remoteRefs[h] {
-		haves[h] = true
-		return nil
-	}
-
 	commit, err := object.GetCommit(s, h)
 	if err != nil {
-		// Ignore the error if this isn't a commit.
-		haves[ref.Hash()] = true
+		if !errors.Is(err, plumbing.ErrObjectNotFound) {
+			// Ignore the error if this isn't a commit.
+			haves[ref.Hash()] = true
+		}
 		return nil
 	}
 
@@ -1066,7 +1106,7 @@ func checkFastForwardUpdate(s storer.EncodedObjectStorer, remoteRefs storer.Refe
 		return fmt.Errorf("non-fast-forward update: %s", cmd.Name.String())
 	}
 
-	ff, err := isFastForward(s, cmd.Old, cmd.New)
+	ff, err := isFastForward(s, cmd.Old, cmd.New, nil)
 	if err != nil {
 		return err
 	}
@@ -1078,14 +1118,28 @@ func checkFastForwardUpdate(s storer.EncodedObjectStorer, remoteRefs storer.Refe
 	return nil
 }
 
-func isFastForward(s storer.EncodedObjectStorer, old, new plumbing.Hash) (bool, error) {
+func isFastForward(s storer.EncodedObjectStorer, old, new plumbing.Hash, earliestShallow *plumbing.Hash) (bool, error) {
 	c, err := object.GetCommit(s, new)
 	if err != nil {
 		return false, err
 	}
 
+	parentsToIgnore := []plumbing.Hash{}
+	if earliestShallow != nil {
+		earliestCommit, err := object.GetCommit(s, *earliestShallow)
+		if err != nil {
+			return false, err
+		}
+
+		parentsToIgnore = earliestCommit.ParentHashes
+	}
+
 	found := false
-	iter := object.NewCommitPreorderIter(c, nil, nil)
+	// stop iterating at the earliest shallow commit, ignoring its parents
+	// note: when pull depth is smaller than the number of new changes on the remote, this fails due to missing parents.
+	//       as far as i can tell, without the commits in-between the shallow pull and the earliest shallow, there's no
+	//       real way of telling whether it will be a fast-forward merge.
+	iter := object.NewCommitPreorderIter(c, nil, parentsToIgnore)
 	err = iter.ForEach(func(c *object.Commit) error {
 		if c.Hash != old {
 			return nil
@@ -1198,10 +1252,10 @@ func (r *Remote) updateLocalReferenceStorage(
 			old, _ := storer.ResolveReference(r.s, localName)
 			new := plumbing.NewHashReference(localName, ref.Hash())
 
-			// If the ref exists locally as a branch and force is not specified,
-			// only update if the new ref is an ancestor of the old
-			if old != nil && old.Name().IsBranch() && !force && !spec.IsForceUpdate() {
-				ff, err := isFastForward(r.s, old.Hash(), new.Hash())
+			// If the ref exists locally as a non-tag and force is not
+			// specified, only update if the new ref is an ancestor of the old
+			if old != nil && !old.Name().IsTag() && !force && !spec.IsForceUpdate() {
+				ff, err := isFastForward(r.s, old.Hash(), new.Hash(), nil)
 				if err != nil {
 					return updated, err
 				}
@@ -1386,8 +1440,7 @@ func pushHashes(
 	useRefDeltas bool,
 	allDelete bool,
 ) (*packp.ReportStatus, error) {
-
-	rd, wr := ioutil.Pipe()
+	rd, wr := io.Pipe()
 
 	config, err := s.Config()
 	if err != nil {

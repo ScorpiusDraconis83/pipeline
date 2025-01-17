@@ -86,7 +86,7 @@ func TestPipelineTask_OnError(t *testing.T) {
 			OnError: PipelineTaskContinue,
 			TaskRef: &TaskRef{Name: "foo"},
 		},
-		wc: cfgtesting.EnableAlphaAPIFields,
+		wc: cfgtesting.EnableBetaAPIFields,
 	}, {
 		name: "valid PipelineTask with onError:stopAndFail",
 		p: PipelineTask{
@@ -94,7 +94,7 @@ func TestPipelineTask_OnError(t *testing.T) {
 			OnError: PipelineTaskStopAndFail,
 			TaskRef: &TaskRef{Name: "foo"},
 		},
-		wc: cfgtesting.EnableAlphaAPIFields,
+		wc: cfgtesting.EnableBetaAPIFields,
 	}, {
 		name: "invalid OnError value",
 		p: PipelineTask{
@@ -103,7 +103,7 @@ func TestPipelineTask_OnError(t *testing.T) {
 			TaskRef: &TaskRef{Name: "foo"},
 		},
 		expectedError: apis.ErrInvalidValue("invalid-val", "OnError", "PipelineTask OnError must be either \"continue\" or \"stopAndFail\""),
-		wc:            cfgtesting.EnableAlphaAPIFields,
+		wc:            cfgtesting.EnableBetaAPIFields,
 	}, {
 		name: "OnError:stopAndFail and retries coexist - success",
 		p: PipelineTask{
@@ -112,7 +112,7 @@ func TestPipelineTask_OnError(t *testing.T) {
 			Retries: 1,
 			TaskRef: &TaskRef{Name: "foo"},
 		},
-		wc: cfgtesting.EnableAlphaAPIFields,
+		wc: cfgtesting.EnableBetaAPIFields,
 	}, {
 		name: "OnError:continue and retries coexists - failure",
 		p: PipelineTask{
@@ -122,15 +122,6 @@ func TestPipelineTask_OnError(t *testing.T) {
 			TaskRef: &TaskRef{Name: "foo"},
 		},
 		expectedError: apis.ErrGeneric("PipelineTask OnError cannot be set to \"continue\" when Retries is greater than 0"),
-		wc:            cfgtesting.EnableAlphaAPIFields,
-	}, {
-		name: "setting OnError in beta API version - failure",
-		p: PipelineTask{
-			Name:    "foo",
-			OnError: PipelineTaskContinue,
-			TaskRef: &TaskRef{Name: "foo"},
-		},
-		expectedError: apis.ErrGeneric("OnError requires \"enable-api-fields\" feature gate to be \"alpha\" but it is \"beta\""),
 		wc:            cfgtesting.EnableBetaAPIFields,
 	}, {
 		name: "setting OnError in stable API version - failure",
@@ -139,7 +130,7 @@ func TestPipelineTask_OnError(t *testing.T) {
 			OnError: PipelineTaskContinue,
 			TaskRef: &TaskRef{Name: "foo"},
 		},
-		expectedError: apis.ErrGeneric("OnError requires \"enable-api-fields\" feature gate to be \"alpha\" but it is \"stable\""),
+		expectedError: apis.ErrGeneric("OnError requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\""),
 		wc:            cfgtesting.EnableStableAPIFields,
 	}}
 	for _, tt := range tests {
@@ -581,6 +572,7 @@ func TestPipelineTask_ValidateRegularTask_Failure(t *testing.T) {
 		name          string
 		task          PipelineTask
 		expectedError apis.FieldError
+		configMap     map[string]string
 	}{{
 		name: "pipeline task - invalid taskSpec",
 		task: PipelineTask{
@@ -612,15 +604,58 @@ func TestPipelineTask_ValidateRegularTask_Failure(t *testing.T) {
 			Paths:   []string{"taskRef.name"},
 		},
 	}, {
-		name: "pipeline task - taskRef with resolver and name",
+		name: "pipeline task - taskRef with resolver and k8s style name",
 		task: PipelineTask{
 			Name:    "foo",
 			TaskRef: &TaskRef{Name: "foo", ResolverRef: ResolverRef{Resolver: "git"}},
 		},
 		expectedError: apis.FieldError{
-			Message: `expected exactly one, got both`,
-			Paths:   []string{"taskRef.name", "taskRef.resolver"},
+			Message: `invalid value: invalid URI for request`,
+			Paths:   []string{"taskRef.name"},
 		},
+		configMap: map[string]string{"enable-concise-resolver-syntax": "true"},
+	}, {
+		name: "pipeline task - taskRef with url-like name without enable-concise-resolver-syntax",
+		task: PipelineTask{
+			Name:    "foo",
+			TaskRef: &TaskRef{Name: "https://foo.com/bar"},
+		},
+		expectedError: *apis.ErrMissingField("taskRef.resolver").Also(&apis.FieldError{
+			Message: `feature flag enable-concise-resolver-syntax should be set to true to use concise resolver syntax`,
+			Paths:   []string{"taskRef"},
+		}),
+	}, {
+		name: "pipeline task - taskRef without enable-concise-resolver-syntax",
+		task: PipelineTask{
+			Name:    "foo",
+			TaskRef: &TaskRef{Name: "https://foo.com/bar", ResolverRef: ResolverRef{Resolver: "git"}},
+		},
+		expectedError: apis.FieldError{
+			Message: `feature flag enable-concise-resolver-syntax should be set to true to use concise resolver syntax`,
+			Paths:   []string{"taskRef"},
+		},
+	}, {
+		name: "pipeline task - taskRef with url-like name without resolver",
+		task: PipelineTask{
+			Name:    "foo",
+			TaskRef: &TaskRef{Name: "https://foo.com/bar"},
+		},
+		expectedError: apis.FieldError{
+			Message: `missing field(s)`,
+			Paths:   []string{"taskRef.resolver"},
+		},
+		configMap: map[string]string{"enable-concise-resolver-syntax": "true"},
+	}, {
+		name: "pipeline task - taskRef with name and params",
+		task: PipelineTask{
+			Name:    "foo",
+			TaskRef: &TaskRef{Name: "https://foo/bar", ResolverRef: ResolverRef{Resolver: "git", Params: Params{{Name: "foo", Value: ParamValue{StringVal: "bar"}}}}},
+		},
+		expectedError: apis.FieldError{
+			Message: `expected exactly one, got both`,
+			Paths:   []string{"taskRef.name", "taskRef.params"},
+		},
+		configMap: map[string]string{"enable-concise-resolver-syntax": "true"},
 	}, {
 		name: "pipeline task - taskRef with resolver params but no resolver",
 		task: PipelineTask{
@@ -634,7 +669,8 @@ func TestPipelineTask_ValidateRegularTask_Failure(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.task.validateTask(context.Background())
+			ctx := cfgtesting.SetFeatureFlags(context.Background(), t, tt.configMap)
+			err := tt.task.validateTask(ctx)
 			if err == nil {
 				t.Error("PipelineTask.validateTask() did not return error for invalid pipeline task")
 			}

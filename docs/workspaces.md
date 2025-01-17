@@ -255,7 +255,7 @@ a `Task` requires but which are not provided by the `TaskRun` will be bound with
 
 The configuration for the default `Workspace Binding` is added to the `config-defaults` `ConfigMap`, under
 the `default-task-run-workspace-binding` key. For an example, see the [Customizing basic execution
-parameters](./install.md#customizing-basic-execution-parameters) section of the install doc.
+parameters](./additional-configs.md#customizing-basic-execution-parameters) section of the install doc.
 
 **Note:** the default configuration is used for any _required_ `Workspace` declared by a `Task`. Optional
 `Workspaces` are not populated with the default binding. This is because a `Task's` behaviour will typically
@@ -532,7 +532,7 @@ workspaces:
 The `csi` field references a [`csi` volume](https://kubernetes.io/docs/concepts/storage/volumes/#csi).
 `csi` workspaces are a [beta feature](./additional-configs.md#beta-features).
 Using a `csi` volume has the following limitations:
-
+<!-- wokeignore:rule=master --> 
 - `csi` volume sources require a volume driver to use, which must correspond to the value by the CSI driver as defined in the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md#getplugininfo).
 
 ```yaml

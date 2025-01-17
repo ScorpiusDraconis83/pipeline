@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/internal/url"
+	"github.com/go-git/go-git/v5/plumbing"
 	format "github.com/go-git/go-git/v5/plumbing/format/config"
 )
 
@@ -251,6 +252,7 @@ const (
 	extensionsSection          = "extensions"
 	fetchKey                   = "fetch"
 	urlKey                     = "url"
+	pushurlKey                 = "pushurl"
 	bareKey                    = "bare"
 	worktreeKey                = "worktree"
 	commentCharKey             = "commentChar"
@@ -614,7 +616,7 @@ func (c *RemoteConfig) Validate() error {
 		c.Fetch = []RefSpec{RefSpec(fmt.Sprintf(DefaultFetchRefSpec, c.Name))}
 	}
 
-	return nil
+	return plumbing.NewRemoteHEADReferenceName(c.Name).Validate()
 }
 
 func (c *RemoteConfig) unmarshal(s *format.Subsection) error {
@@ -632,6 +634,7 @@ func (c *RemoteConfig) unmarshal(s *format.Subsection) error {
 
 	c.Name = c.raw.Name
 	c.URLs = append([]string(nil), c.raw.Options.GetAll(urlKey)...)
+	c.URLs = append(c.URLs, c.raw.Options.GetAll(pushurlKey)...)
 	c.Fetch = fetch
 	c.Mirror = c.raw.Options.Get(mirrorKey) == "true"
 

@@ -570,7 +570,7 @@ For example, `foo.Is-Bar_` is a valid parameter name for string or array type, b
 > 2. If a parameter name contains dots (.), it must be referenced by using the [bracket notation](#substituting-parameters-and-resources) with either single or double quotes i.e. `$(params['foo.bar'])`, `$(params["foo.bar"])`. See the following example for more information.
 
 #### Parameter type
-Each declared parameter has a `type` field, which can be set to `string`, `array` (beta feature) or `object` (beta feature).
+Each declared parameter has a `type` field, which can be set to `string`, `array` or `object`.
 
 ##### `object` type
 
@@ -588,13 +588,12 @@ spec:
           type: string
 ```
 
-Refer to the [TaskRun example](../examples/v1/taskruns/beta/object-param-result.yaml) and the [PipelineRun example](../examples/v1/pipelineruns/beta/pipeline-object-param-and-result.yaml) in which `object` parameters are demonstrated.
+Refer to the [TaskRun example](../examples/v1/taskruns/object-param-result.yaml) and the [PipelineRun example](../examples/v1/pipelineruns/pipeline-object-param-and-result.yaml) in which `object` parameters are demonstrated.
 
   > NOTE:
-  > - `object` param is a `beta` feature and gated by the `alpha` or `beta` feature flag.
   > - `object` param must specify the `properties` section to define the schema i.e. what keys are available for this object param. See how to define `properties` section in the following example and the [TEP-0075](https://github.com/tektoncd/community/blob/main/teps/0075-object-param-and-result-types.md#defaulting-to-string-types-for-values).
-  > - When providing value for an `object` param, one may provide values for just a subset of keys in spec's `default`, and provide values for the rest of keys at runtime ([example](../examples/v1/taskruns/beta/object-param-result.yaml)).
-  > - When using object in variable replacement, users can only access its individual key ("child" member) of the object by its name i.e. `$(params.gitrepo.url)`. Using an entire object as a value is only allowed when the value is also an object like [this example](https://github.com/tektoncd/pipeline/blob/55665765e4de35b3a4fb541549ae8cdef0996641/examples/v1/pipelineruns/beta/pipeline-object-param-and-result.yaml#L64-L65). See more details about using object param from the [TEP-0075](https://github.com/tektoncd/community/blob/main/teps/0075-object-param-and-result-types.md#using-objects-in-variable-replacement).
+  > - When providing value for an `object` param, one may provide values for just a subset of keys in spec's `default`, and provide values for the rest of keys at runtime ([example](../examples/v1/taskruns/object-param-result.yaml)).
+  > - When using object in variable replacement, users can only access its individual key ("child" member) of the object by its name i.e. `$(params.gitrepo.url)`. Using an entire object as a value is only allowed when the value is also an object like [this example](../examples/v1/pipelineruns/pipeline-object-param-and-result.yaml). See more details about using object param from the [TEP-0075](https://github.com/tektoncd/community/blob/main/teps/0075-object-param-and-result-types.md#using-objects-in-variable-replacement).
 
 ##### `array` type
 
@@ -859,8 +858,14 @@ precise string you want returned from your `Task` into the result files that you
 The stored results can be used [at the `Task` level](./pipelines.md#passing-one-tasks-results-into-the-parameters-or-when-expressions-of-another)
 or [at the `Pipeline` level](./pipelines.md#emitting-results-from-a-pipeline).
 
+> **Note** Tekton does not enforce Task results unless there is a consumer: when a Task declares a result,
+> it may complete successfully even if no result was actually produced. When a Task that declares results is
+> used in a Pipeline, and a component of the Pipeline attempts to consume the Task's result, if the result
+> was not produced the pipeline will fail. [TEP-0048](https://github.com/tektoncd/community/blob/main/teps/0048-task-results-without-results.md)
+> propopses introducing default values for results to help Pipeline authors manage this case.
+
 #### Emitting Object `Results`
-Emitting a task result of type `object` is a `beta` feature implemented based on the
+Emitting a task result of type `object` is implemented based on the
 [TEP-0075](https://github.com/tektoncd/community/blob/main/teps/0075-object-param-and-result-types.md#emitting-object-results).
 You can initialize `object` results from a `task` using JSON escaped string. For example, to assign the following data to an object result:
 
@@ -1018,7 +1023,7 @@ As a general rule-of-thumb, if a result needs to be larger than a kilobyte, you 
 
 #### Larger `Results` using sidecar logs
 
-This is an alpha feature which is guarded behind its own feature flag.  The `results-from` feature flag must be set to
+This is a beta feature which is guarded behind its own feature flag.  The `results-from` feature flag must be set to
 [`"sidecar-logs"`](./install.md#enabling-larger-results-using-sidecar-logs) to enable larger results using sidecar logs.
 
 Instead of using termination messages to store results, the taskrun controller injects a sidecar container which monitors
@@ -1107,6 +1112,11 @@ to run alongside the `Steps` in your `Task`. You can use `Sidecars` to provide a
 [Docker in Docker](https://hub.docker.com/_/docker) or running a mock API server that your app can hit during testing.
 `Sidecars` spin up before your `Task` executes and are deleted after the `Task` execution completes.
 For further information, see [`Sidecars` in `TaskRuns`](taskruns.md#specifying-sidecars).
+
+**Note**: Starting in v0.62 you can enable native Kubernetes sidecar support using the `enable-kubernetes-sidecar` feature flag ([see instructions](./additional-configs.md#customizing-the-pipelines-controller-behavior)). If kubernetes does not wait for your sidecar application to be ready, use a `startupProbe` to help kubernetes identify when it is ready.
+
+Refer to the detailed instructions listed in [additional config](additional-configs.md#enabling-larger-results-using-sidecar-logs)
+to learn how to enable this feature.
 
 In the example below, a `Step` uses a Docker-in-Docker `Sidecar` to build a Docker image:
 

@@ -452,7 +452,7 @@ func TestArrayReference(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		if d := cmp.Diff(tt.expectedResult, v1.ArrayReference(tt.p)); d != "" {
-			t.Errorf(diff.PrintWantGot(d))
+			t.Error(diff.PrintWantGot(d))
 		}
 	}
 }
@@ -471,7 +471,8 @@ func TestExtractNames(t *testing.T) {
 		params: v1.Params{{
 			Name: "IMAGE", Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "image-1"},
 		}, {
-			Name: "DOCKERFILE", Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "path/to/Dockerfile1"}}},
+			Name: "DOCKERFILE", Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "path/to/Dockerfile1"},
+		}},
 		want: sets.NewString("IMAGE", "DOCKERFILE"),
 	}, {
 		name: "extract param names from ParamTypeArray",
@@ -498,7 +499,7 @@ func TestExtractNames(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		if d := cmp.Diff(tt.want, v1.Params.ExtractNames(tt.params)); d != "" {
-			t.Errorf(diff.PrintWantGot(d))
+			t.Error(diff.PrintWantGot(d))
 		}
 	}
 }
@@ -561,7 +562,7 @@ func TestParams_ReplaceVariables(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.ps.ReplaceVariables(tt.stringReplacements, tt.arrayReplacements, tt.objectReplacements)
 			if d := cmp.Diff(tt.want, got); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -681,10 +682,10 @@ func TestParseTaskandResultName(t *testing.T) {
 			pipelineTaskName, resultName := tc.param.ParseTaskandResultName()
 
 			if d := cmp.Diff(tc.pipelineTaskName, pipelineTaskName); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 			if d := cmp.Diff(tc.resultName, resultName); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -708,7 +709,7 @@ func TestGetNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.params.GetNames()
 			if d := cmp.Diff(tc.want, got); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -769,7 +770,7 @@ func TestSortByType(t *testing.T) {
 			s, a, o := tc.params.SortByType()
 			got := []v1.ParamSpecs{s, a, o}
 			if d := cmp.Diff(tc.want, got); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -803,7 +804,7 @@ func TestValidateNoDuplicateNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.params.ValidateNoDuplicateNames()
 			if d := cmp.Diff(tc.expectedError.Error(), got.Error()); d != "" {
-				t.Errorf(diff.PrintWantGot(d))
+				t.Error(diff.PrintWantGot(d))
 			}
 		})
 	}

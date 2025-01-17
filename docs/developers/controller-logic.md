@@ -3,6 +3,7 @@
 Before learning about how Tekton works, it's useful to take some time to understand what a Kubernetes object is.
 Please see [Understanding Kubernetes objects](https://kubernetes.io/docs/concepts/overview/working-with-objects/kubernetes-objects/)
 for an overview of working with objects.
+<!-- wokeignore:rule=master -->
 Kubernetes [API conventions docs](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#types-kinds)
 are another useful resource for understanding object terminology.
 
@@ -39,7 +40,7 @@ All Tekton CRDs use validating [admission webhooks](https://kubernetes.io/docs/r
 to validate instances of CRDs. Some CRDs also use mutating admission webhooks to set default values for some fields.
 Validation and defaulting code is found in the [apis folder](../../pkg/apis/pipeline/v1).
 For a useful overview and tutorial on admission webhooks, see
-[In-depth introduction to Kubernetes admission webhooks](https://banzaicloud.com/blog/k8s-admission-webhooks/).
+[In-depth introduction to Kubernetes admission webhooks](https://web.archive.org/web/20230928184501/https://banzaicloud.com/blog/k8s-admission-webhooks/).
 
 ### Generated Code
 

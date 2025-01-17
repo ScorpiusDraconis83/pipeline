@@ -56,6 +56,15 @@ You must install these tools:
 
 1. [`git`](https://help.github.com/articles/set-up-git/): For source control
 
+1. [`pre-commit`](https://pre-commit.com/#install): pre-commit generates and runs locally a few checks (as [git-hooks](https://git-scm.com/book/en/v2/Customizing-Git-Git-Hooks)) to ensure the pushed code is valid. All checks are performed prior to `git push` command.
+
+   ```shell
+   # After install step run pre-commit binary at the root directory in order to install git hooks.
+   pre-commit install
+   # Run the hooks against all of the files
+   pre-commit run --all-files
+   ```
+
 1. [`go`](https://golang.org/doc/install): The language Tekton Pipelines is
     built in.
     > **Note** Golang [version v1.15](https://golang.org/dl/) or higher is recommended.
@@ -87,9 +96,9 @@ You must install these tools:
 1. [`go-licenses`](https://github.com/google/go-licenses) is used in e2e tests.
 
 1. (Optional)
-   [`golangci-lint`](https://golangci-lint.run/usage/install/#local-installation)
+   [`golangci-lint`](https://golangci-lint.run/welcome/install/#local-installation)
    is run against every PR. You may want to install and [run this tool
-   locally](https://golangci-lint.run/usage/quick-start) to iterate quickly on
+   locally](https://golangci-lint.run/welcome/quick-start) to iterate quickly on
    linter issues.
 
    > **Note** Linter findings are dependent on your installed Go version. Match
@@ -274,7 +283,7 @@ as follows.
 
 The recommended minimum development configuration is:
 
-- Kubernetes version 1.25 or later
+- Kubernetes version 1.28 or later
 - 4 (virtual) CPU nodes
   - 8 GB of (actual or virtualized) platform memory
 - Node autoscaling, up to 3 nodes
@@ -332,7 +341,7 @@ optional: As a convenience, the [Tekton plumbing project](https://github.com/tek
      --region=us-central1 \
      --machine-type=e2-standard-4 \
      --num-nodes=1 \
-     --cluster-version=1.25
+     --cluster-version=1.28
     ```
 
     > **Note**: The recommended [GCE machine type](https://cloud.google.com/compute/docs/machine-types) is `'e2-standard-4'`.

@@ -43,6 +43,8 @@ import (
 // Reconciler handles ResolutionRequest objects, performs functionality
 // common to all resolvers and delegates resolver-specific actions
 // to its embedded type-specific Resolver object.
+//
+// Deprecated: Use [github.com/tektoncd/pipeline/pkg/remoteresolution/resolver/framework.Reconciler] instead.
 type Reconciler struct {
 	// Implements reconciler.LeaderAware
 	reconciler.LeaderAwareFuncs
@@ -107,9 +109,18 @@ func (r *Reconciler) resolve(ctx context.Context, key string, rr *v1beta1.Resolu
 	errChan := make(chan error)
 	resourceChan := make(chan ResolvedResource)
 
+	paramsMap := make(map[string]string)
+	for _, p := range rr.Spec.Params {
+		paramsMap[p.Name] = p.Value.StringVal
+	}
+
 	timeoutDuration := defaultMaximumResolutionDuration
 	if timed, ok := r.resolver.(TimedResolution); ok {
-		timeoutDuration = timed.GetResolutionTimeout(ctx, defaultMaximumResolutionDuration)
+		var err error
+		timeoutDuration, err = timed.GetResolutionTimeout(ctx, defaultMaximumResolutionDuration, paramsMap)
+		if err != nil {
+			return err
+		}
 	}
 
 	// A new context is created for resolution so that timeouts can

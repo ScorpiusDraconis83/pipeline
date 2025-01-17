@@ -40,6 +40,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/apis/config"
 	cfgtesting "github.com/tektoncd/pipeline/pkg/apis/config/testing"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
+	pipelineErrors "github.com/tektoncd/pipeline/pkg/apis/pipeline/errors"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/pod"
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
@@ -54,6 +55,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/reconciler/volumeclaim"
 	resolutioncommon "github.com/tektoncd/pipeline/pkg/resolution/common"
 	remoteresource "github.com/tektoncd/pipeline/pkg/resolution/resource"
+	_ "github.com/tektoncd/pipeline/pkg/taskrunmetrics/fake"
 	"github.com/tektoncd/pipeline/pkg/trustedresources"
 	"github.com/tektoncd/pipeline/pkg/trustedresources/verifier"
 	"github.com/tektoncd/pipeline/pkg/workspace"
@@ -168,14 +170,15 @@ var (
 		ObjectMeta: objectMeta("test-results-task", "foo"),
 		Spec: v1.TaskSpec{
 			Steps: []v1.Step{simpleStep},
-			Results: []v1.TaskResult{{
-				Name: "aResult",
-				Type: v1.ResultsTypeArray,
-			}, {
-				Name:       "objectResult",
-				Type:       v1.ResultsTypeObject,
-				Properties: map[string]v1.PropertySpec{"url": {Type: "string"}, "commit": {Type: "string"}},
-			},
+			Results: []v1.TaskResult{
+				{
+					Name: "aResult",
+					Type: v1.ResultsTypeArray,
+				}, {
+					Name:       "objectResult",
+					Type:       v1.ResultsTypeObject,
+					Properties: map[string]v1.PropertySpec{"url": {Type: "string"}, "commit": {Type: "string"}},
+				},
 			},
 		},
 	}
@@ -311,6 +314,13 @@ var (
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
 	}
+
+	artifactsVolume = corev1.Volume{
+		Name: "tekton-internal-artifacts",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	}
 	downwardVolume = corev1.Volume{
 		Name: "tekton-internal-downward",
 		VolumeSource: corev1.VolumeSource{
@@ -421,19 +431,21 @@ func TestReconcile_ExplicitDefaultSA(t *testing.T) {
 metadata:
   name: test-taskrun-run-success
   namespace: foo
+  uid: bar
 spec:
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task
 `)
 	taskRunWithSaSuccess := parse.MustParseV1TaskRun(t, `
 metadata:
   name: test-taskrun-with-sa-run-success
   namespace: foo
+  uid: bar
 spec:
   serviceAccountName: test-sa
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-with-sa
 `)
 	taskruns := []*v1.TaskRun{taskRunSuccess, taskRunWithSaSuccess}
@@ -459,7 +471,7 @@ spec:
 	}{{
 		name:    "success",
 		taskRun: taskRunSuccess,
-		wantPod: expectedPod("test-taskrun-run-success-pod", "test-task", "test-taskrun-run-success", "foo", defaultSAName, false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-run-success-pod", "test-task", "test-taskrun-run-success", "bar", "foo", defaultSAName, false, nil, []stepForExpectedPod{{
 			image: "foo",
 			name:  "simple-step",
 			cmd:   "/mycmd",
@@ -467,7 +479,7 @@ spec:
 	}, {
 		name:    "serviceaccount",
 		taskRun: taskRunWithSaSuccess,
-		wantPod: expectedPod("test-taskrun-with-sa-run-success-pod", "test-with-sa", "test-taskrun-with-sa-run-success", "foo", "test-sa", false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-with-sa-run-success-pod", "test-with-sa", "test-taskrun-with-sa-run-success", "bar", "foo", "test-sa", false, nil, []stepForExpectedPod{{
 			image: "foo",
 			name:  "sa-step",
 			cmd:   "/mycmd",
@@ -617,7 +629,7 @@ spec:
 
 	err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, "reconcile-cloud-events", wantEvents)
 	if !(err == nil) {
-		t.Errorf(err.Error())
+		t.Error(err.Error())
 	}
 
 	wantCloudEvents := []string{
@@ -633,25 +645,28 @@ func TestReconcile(t *testing.T) {
 metadata:
   name: test-taskrun-run-success
   namespace: foo
+  uid: bar
 spec:
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task
 `)
 	taskRunWithSaSuccess := parse.MustParseV1TaskRun(t, `
 metadata:
   name: test-taskrun-with-sa-run-success
   namespace: foo
+  uid: bar
 spec:
   serviceAccountName: test-sa
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-with-sa
 `)
 	taskRunSubstitution := parse.MustParseV1TaskRun(t, `
 metadata:
   name: test-taskrun-substitution
   namespace: foo
+  uid: bar
 spec:
   params:
   - name: myarg
@@ -661,13 +676,14 @@ spec:
   - name: configmapname
     value: configbar
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task-with-substitution
 `)
 	taskRunWithTaskSpec := parse.MustParseV1TaskRun(t, `
 metadata:
   name: test-taskrun-with-taskspec
   namespace: foo
+  uid: bar
 spec:
   params:
   - name: myarg
@@ -689,6 +705,7 @@ spec:
 metadata:
   name: test-taskrun-with-cluster-task
   namespace: foo
+  uid: bar
 spec:
   taskRef:
     kind: ClusterTask
@@ -702,6 +719,7 @@ metadata:
     tekton.dev/taskRun: WillNotBeUsed
   name: test-taskrun-with-labels
   namespace: foo
+  uid: bar
 spec:
   taskRef:
     name: test-task
@@ -713,6 +731,7 @@ metadata:
     TaskRunAnnotation: TaskRunValue
   name: test-taskrun-with-annotations
   namespace: foo
+  uid: bar
 spec:
   taskRef:
     name: test-task
@@ -722,6 +741,7 @@ spec:
 metadata:
   name: test-taskrun-with-pod
   namespace: foo
+  uid: bar
 spec:
   taskRef:
     name: test-task
@@ -733,6 +753,7 @@ status:
 metadata:
   name: test-taskrun-with-credentials-variable
   namespace: foo
+  uid: bar
 spec:
   taskSpec:
     steps:
@@ -760,6 +781,7 @@ spec:
 metadata:
   name: test-taskrun-bundle
   namespace: foo
+  uid: bar
 spec:
   taskRef:
     bundle: %s
@@ -790,7 +812,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-run-success-pod", "test-task", "test-taskrun-run-success", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-run-success-pod", "test-task", "test-taskrun-run-success", "bar", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
 			image: "foo",
 			name:  "simple-step",
 			cmd:   "/mycmd",
@@ -802,7 +824,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-with-sa-run-success-pod", "test-with-sa", "test-taskrun-with-sa-run-success", "foo", "test-sa", false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-with-sa-run-success-pod", "test-with-sa", "test-taskrun-with-sa-run-success", "bar", "foo", "test-sa", false, nil, []stepForExpectedPod{{
 			image: "foo",
 			name:  "sa-step",
 			cmd:   "/mycmd",
@@ -814,7 +836,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-substitution-pod", "test-task-with-substitution", "test-taskrun-substitution", "foo", config.DefaultServiceAccountValue, false, []corev1.Volume{{
+		wantPod: expectedPod("test-taskrun-substitution-pod", "test-task-with-substitution", "test-taskrun-substitution", "bar", "foo", config.DefaultServiceAccountValue, false, []corev1.Volume{{
 			Name: "volume-configmap",
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -850,7 +872,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-with-taskspec-pod", "", "test-taskrun-with-taskspec", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{
+		wantPod: expectedPod("test-taskrun-with-taskspec-pod", "", "test-taskrun-with-taskspec", "bar", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{
 			{
 				name:  "mycontainer",
 				image: "myimage",
@@ -864,7 +886,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-with-cluster-task-pod", "test-cluster-task", "test-taskrun-with-cluster-task", "foo", config.DefaultServiceAccountValue, true, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-with-cluster-task-pod", "test-cluster-task", "test-taskrun-with-cluster-task", "bar", "foo", config.DefaultServiceAccountValue, true, nil, []stepForExpectedPod{{
 			name:  "simple-step",
 			image: "foo",
 			cmd:   "/mycmd",
@@ -876,7 +898,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-with-pod-pod", "test-task", "test-taskrun-with-pod", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-with-pod-pod", "test-task", "test-taskrun-with-pod", "bar", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
 			name:  "simple-step",
 			image: "foo",
 			cmd:   "/mycmd",
@@ -888,7 +910,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-with-credentials-variable-pod", "", "test-taskrun-with-credentials-variable", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-with-credentials-variable-pod", "", "test-taskrun-with-credentials-variable", "bar", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
 			name:  "mycontainer",
 			image: "myimage",
 			cmd:   "/mycmd /tekton/creds",
@@ -900,7 +922,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-bundle-pod", "test-task", "test-taskrun-bundle", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-bundle-pod", "test-task", "test-taskrun-bundle", "bar", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
 			name:  "simple-step",
 			image: "foo",
 			cmd:   "/mycmd",
@@ -958,7 +980,7 @@ spec:
 
 			err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, tc.name, tc.wantEvents)
 			if err != nil {
-				t.Errorf(err.Error())
+				t.Error(err.Error())
 			}
 		})
 	}
@@ -970,6 +992,7 @@ func TestAlphaReconcile(t *testing.T) {
 metadata:
   name: test-taskrun-with-output-config
   namespace: foo
+  uid: bar
 spec:
   taskSpec:
     steps:
@@ -985,6 +1008,7 @@ spec:
 metadata:
   name: test-taskrun-with-output-config-ws
   namespace: foo
+  uid: bar
 spec:
   workspaces:
     - name: data
@@ -1029,7 +1053,7 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: expectedPod("test-taskrun-with-output-config-pod", "", "test-taskrun-with-output-config", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
+		wantPod: expectedPod("test-taskrun-with-output-config-pod", "", "test-taskrun-with-output-config", "bar", "foo", config.DefaultServiceAccountValue, false, nil, []stepForExpectedPod{{
 			name:       "mycontainer",
 			image:      "myimage",
 			stdoutPath: "stdout.txt",
@@ -1042,9 +1066,9 @@ spec:
 			"Normal Started ",
 			"Normal Running Not all Steps",
 		},
-		wantPod: addVolumeMounts(expectedPod("test-taskrun-with-output-config-ws-pod", "", "test-taskrun-with-output-config-ws", "foo", config.DefaultServiceAccountValue, false,
+		wantPod: addVolumeMounts(expectedPod("test-taskrun-with-output-config-ws-pod", "", "test-taskrun-with-output-config-ws", "bar", "foo", config.DefaultServiceAccountValue, false,
 			[]corev1.Volume{{
-				Name: "ws-9l9zj",
+				Name: "ws-d872e",
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				},
@@ -1056,7 +1080,7 @@ spec:
 				cmd:        "/mycmd",
 			}}),
 			[]corev1.VolumeMount{{
-				Name:      "ws-9l9zj",
+				Name:      "ws-d872e",
 				MountPath: "/workspace/data",
 			}}),
 	}} {
@@ -1112,7 +1136,7 @@ spec:
 
 			err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, tc.name, tc.wantEvents)
 			if err != nil {
-				t.Errorf(err.Error())
+				t.Error(err.Error())
 			}
 		})
 	}
@@ -1184,7 +1208,7 @@ spec:
 	}
 
 	// Mock a successful resolution
-	var taskBytes = []byte(`
+	taskBytes := []byte(`
           kind: Task
           apiVersion: tekton.dev/v1
           metadata:
@@ -1192,7 +1216,7 @@ spec:
           spec:
             steps:
             - name: step1
-              image: ubuntu
+              image: docker.io/library/ubuntu
               script: |
                 echo "hello world!"
         `)
@@ -1451,7 +1475,7 @@ spec:
 
 			err := k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, tc.name, tc.wantEvents)
 			if !(err == nil) {
-				t.Errorf(err.Error())
+				t.Error(err.Error())
 			}
 
 			newTr, err := testAssets.Clients.Pipeline.TektonV1().TaskRuns(tc.taskRun.Namespace).Get(testAssets.Ctx, tc.taskRun.Name, metav1.GetOptions{})
@@ -1578,7 +1602,7 @@ status:
   - reason: ToBeRetried
     status: Unknown
     type: Succeeded
-    message: "The step \"unamed-0\" in TaskRun \"test-taskrun-run-retry-pod-failure\" failed to pull the image \"\". The pod errored with the message: \".\""
+    message: "the step \"unamed-0\" in TaskRun \"test-taskrun-run-retry-pod-failure\" failed to pull the image \"\". The pod errored with the message: \".\""
   steps:
   - container: step-unamed-0
     name: unamed-0
@@ -1591,7 +1615,7 @@ status:
     - reason: "TaskRunImagePullFailed"
       status: "False"
       type: Succeeded
-      message: "The step \"unamed-0\" in TaskRun \"test-taskrun-run-retry-pod-failure\" failed to pull the image \"\". The pod errored with the message: \".\""
+      message: "the step \"unamed-0\" in TaskRun \"test-taskrun-run-retry-pod-failure\" failed to pull the image \"\". The pod errored with the message: \".\""
     startTime: "2021-12-31T23:59:59Z"
     completionTime: "2022-01-01T00:00:00Z"
     podName: test-taskrun-run-retry-pod-failure-pod
@@ -1650,7 +1674,7 @@ status:
     startTime: "2021-12-31T23:59:59Z"
     completionTime: "2022-01-01T00:00:00Z"
 `)
-		prepareError                    = fmt.Errorf("1 error occurred:\n\t* error when listing tasks for taskRun test-taskrun-run-retry-prepare-failure: tasks.tekton.dev \"test-task\" not found")
+		prepareError                    = errors.New("1 error occurred:\n\t* error when listing tasks for taskRun test-taskrun-run-retry-prepare-failure: tasks.tekton.dev \"test-task\" not found")
 		toFailOnReconcileFailureTaskRun = parse.MustParseV1TaskRun(t, `
 metadata:
   name: test-taskrun-results-type-mismatched
@@ -1666,7 +1690,7 @@ status:
       type: string
       value: aResultValue
 `)
-		failedOnReconcileFailureTaskRun = parse.MustParseV1TaskRun(t, `
+		failedOnReconcileFailureTaskRun = parse.MustParseV1TaskRun(t, fmt.Sprintf(`
 metadata:
   name: test-taskrun-results-type-mismatched
   namespace: foo
@@ -1679,21 +1703,20 @@ status:
   - reason: ToBeRetried
     status: Unknown
     type: Succeeded
-    message: "Provided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\""
+    message: "%sProvided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\""
   sideCars:
   retriesStatus:
   - conditions:
     - reason: TaskRunValidationFailed
       status: "False"
       type: "Succeeded"
-      message: "Provided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\""
+      message: "%sProvided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\""
     startTime: "2021-12-31T23:59:59Z"
     completionTime: "2022-01-01T00:00:00Z"
     podName: "test-taskrun-results-type-mismatched-pod"
     provenance:
       featureFlags:
         RunningInEnvWithInjectedSidecars: true
-        EnableTektonOCIBundles: true
         EnforceNonfalsifiability: "none"
         EnableAPIFields: "alpha"
         AwaitSidecarReadiness: true
@@ -1702,10 +1725,10 @@ status:
         ResultExtractionMethod: "termination-message"
         MaxResultSize: 4096
         Coschedule: "workspaces"
+        DisableInlineSpec: ""
   provenance:
     featureFlags:
       RunningInEnvWithInjectedSidecars: true
-      EnableTektonOCIBundles: true
       EnableAPIFields: "alpha"
       EnforceNonfalsifiability: "none"
       AwaitSidecarReadiness: true
@@ -1714,8 +1737,9 @@ status:
       ResultExtractionMethod: "termination-message"
       MaxResultSize: 4096
       Coschedule: "workspaces"
-`)
-		reconciliatonError = fmt.Errorf("1 error occurred:\n\t* Provided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\"")
+      DisableInlineSpec: ""
+`, pipelineErrors.UserErrorLabel, pipelineErrors.UserErrorLabel))
+		reconciliatonError = errors.New("1 error occurred:\n\t* Provided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\"")
 		toBeRetriedTaskRun = parse.MustParseV1TaskRun(t, `
 metadata:
   name: test-taskrun-to-be-retried
@@ -1767,6 +1791,7 @@ status:
       ResultExtractionMethod: "termination-message"
       MaxResultSize: 4096
       Coschedule: "workspaces"
+      DisableInlineSpec: ""
 `)
 		toBeRetriedWithResultsTaskRun = parse.MustParseV1TaskRun(t, `
 metadata:
@@ -1960,38 +1985,46 @@ spec:
 		Tasks:        []*v1.Task{simpleTask},
 		ClusterTasks: []*v1beta1.ClusterTask{},
 	}
-	testAssets, cancel := getTaskRunController(t, d)
-	defer cancel()
-	c := testAssets.Controller
-	clients := testAssets.Clients
-	createServiceAccount(t, testAssets, "default", tr.Namespace)
+	for _, v := range []error{
+		errors.New("etcdserver: leader changed"),
+		context.DeadlineExceeded,
+		apierrors.NewConflict(pipeline.TaskRunResource, "", nil),
+		apierrors.NewServerTimeout(pipeline.TaskRunResource, "", 0),
+		apierrors.NewTimeoutError("", 0),
+	} {
+		testAssets, cancel := getTaskRunController(t, d)
+		defer cancel()
+		c := testAssets.Controller
+		clients := testAssets.Clients
+		createServiceAccount(t, testAssets, "default", tr.Namespace)
 
-	failingReactorActivated := true
-	clients.Pipeline.PrependReactor("*", "tasks", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
-		return failingReactorActivated, &v1.Task{}, errors.New("etcdserver: leader changed")
-	})
-	err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(tr))
-	if err == nil {
-		t.Error("Wanted a wrapped error, but got nil.")
-	}
-	if controller.IsPermanentError(err) {
-		t.Errorf("Unexpected permanent error %v", err)
-	}
-
-	failingReactorActivated = false
-	err = c.Reconciler.Reconcile(testAssets.Ctx, getRunName(tr))
-	if err != nil {
-		if ok, _ := controller.IsRequeueKey(err); !ok {
-			t.Errorf("unexpected error in TaskRun reconciliation: %v", err)
+		failingReactorActivated := true
+		clients.Pipeline.PrependReactor("*", "tasks", func(action ktesting.Action) (handled bool, ret runtime.Object, err error) {
+			return failingReactorActivated, &v1.Task{}, v
+		})
+		err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(tr))
+		if err == nil {
+			t.Error("Wanted a wrapped error, but got nil.")
 		}
-	}
-	reconciledRun, err := clients.Pipeline.TektonV1().TaskRuns("foo").Get(testAssets.Ctx, tr.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Somehow had error getting reconciled run out of fake client: %s", err)
-	}
-	condition := reconciledRun.Status.GetCondition(apis.ConditionSucceeded)
-	if !condition.IsUnknown() {
-		t.Errorf("Expected TaskRun to still be running but succeeded condition is %v", condition.Status)
+		if controller.IsPermanentError(err) {
+			t.Errorf("Unexpected permanent error %v", err)
+		}
+
+		failingReactorActivated = false
+		err = c.Reconciler.Reconcile(testAssets.Ctx, getRunName(tr))
+		if err != nil {
+			if ok, _ := controller.IsRequeueKey(err); !ok {
+				t.Errorf("unexpected error in TaskRun reconciliation: %v", err)
+			}
+		}
+		reconciledRun, err := clients.Pipeline.TektonV1().TaskRuns("foo").Get(testAssets.Ctx, tr.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Somehow had error getting reconciled run out of fake client: %s", err)
+		}
+		condition := reconciledRun.Status.GetCondition(apis.ConditionSucceeded)
+		if !condition.IsUnknown() {
+			t.Errorf("Expected TaskRun to still be running but succeeded condition is %v", condition.Status)
+		}
 	}
 }
 
@@ -2094,7 +2127,7 @@ spec:
           resolver: bar
 `)
 
-	stepAction := parse.MustParseV1alpha1StepAction(t, `
+	stepAction := parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction
   namespace: foo
@@ -2129,7 +2162,7 @@ spec:
 	clients := testAssets.Clients
 	err = c.Reconciler.Reconcile(testAssets.Ctx, fmt.Sprintf("%s/%s", tr.Namespace, tr.Name))
 	if controller.IsPermanentError(err) {
-		t.Errorf("Not expected permanent error but got %t", err)
+		t.Errorf("Not expected permanent error but got %v", err)
 	}
 	reconciledRun, err := clients.Pipeline.TektonV1().TaskRuns(tr.Namespace).Get(testAssets.Ctx, tr.Name, metav1.GetOptions{})
 	if err != nil {
@@ -2154,7 +2187,7 @@ spec:
           resolver: bar
 `)}
 
-	stepAction := parse.MustParseV1alpha1StepAction(t, `
+	stepAction := parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction
   namespace: foo
@@ -2299,7 +2332,7 @@ status:
 	// Check actions
 	actions := clients.Kube.Actions()
 	if len(actions) != 2 || !actions[0].Matches("list", "configmaps") || !actions[1].Matches("watch", "configmaps") {
-		t.Errorf("expected 2 actions (list configmaps, and watch configmaps) created by the reconciler,"+
+		t.Errorf("expected 3 actions (list configmaps, and watch configmaps) created by the reconciler,"+
 			" got %d. Actions: %#v", len(actions), actions)
 	}
 
@@ -2468,7 +2501,7 @@ status:
 	}
 	err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, "test-reconcile-pod-updateStatus", wantEvents)
 	if !(err == nil) {
-		t.Errorf(err.Error())
+		t.Error(err.Error())
 	}
 }
 
@@ -2567,7 +2600,7 @@ status:
 	}
 	err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, "test-reconcile-on-cancelled-taskrun", wantEvents)
 	if !(err == nil) {
-		t.Errorf(err.Error())
+		t.Error(err.Error())
 	}
 
 	// reconcile the completed TaskRun again without the pod as that was deleted
@@ -2640,7 +2673,7 @@ status:
 	}
 	err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, "test-reconcile-on-timedout-taskrun", wantEvents)
 	if !(err == nil) {
-		t.Errorf(err.Error())
+		t.Error(err.Error())
 	}
 
 	// reconcile the completed TaskRun again without the pod as that was deleted
@@ -2658,13 +2691,16 @@ status:
 	}
 }
 
-func TestReconcilePodFailuresImageFailures(t *testing.T) {
+func TestReconcilePodFailures(t *testing.T) {
 	var stepNumber int8
 	for _, tc := range []struct {
-		desc    string
-		reason  string
-		message string
-		failure string // "step" or "sidecar"
+		desc                    string
+		reason                  string
+		message                 string
+		failure                 string // "step" or "sidecar"
+		imagePullBackOffTimeout string
+		podNotFound             bool
+		usePodRTSCondition      bool // use "PodReadyToStartContainers"(1.29) or corev1.PodInitialized to start timeout
 	}{{
 		desc:    "image pull failed sidecar",
 		reason:  "ImagePullBackOff",
@@ -2685,6 +2721,53 @@ func TestReconcilePodFailuresImageFailures(t *testing.T) {
 		reason:  "InvalidImageName",
 		message: "Invalid image \"whatever\"",
 		failure: "step",
+	}, {
+		desc:                    "image pull failure for the sidecar with non-zero imagePullBackOff timeout",
+		reason:                  "ImagePullBackOff",
+		message:                 "Back-off pulling image \"whatever\"",
+		failure:                 "sidecar",
+		imagePullBackOffTimeout: "5s",
+	}, {
+		desc:                    "image pull failure for the sidecar with non-zero imagePullBackOff timeout and no pod - using PodInitialized",
+		reason:                  "ImagePullBackOff",
+		message:                 "pods \"pod-1\" not found",
+		failure:                 "sidecar",
+		imagePullBackOffTimeout: "5m",
+		podNotFound:             true,
+		usePodRTSCondition:      false,
+	}, {
+		desc:                    "image pull failure for the sidecar with non-zero imagePullBackOff timeout and no pod - using PodReadyToStartContainer",
+		reason:                  "ImagePullBackOff",
+		message:                 "pods \"pod-1\" not found",
+		failure:                 "sidecar",
+		imagePullBackOffTimeout: "5m",
+		podNotFound:             true,
+		usePodRTSCondition:      true,
+	}, {
+		desc:                    "invalid image sidecar with non-zero imagePullBackOff timeout",
+		reason:                  "InvalidImageName",
+		message:                 "Invalid image \"whatever\"",
+		failure:                 "sidecar",
+		imagePullBackOffTimeout: "5h",
+	}, {
+		desc:                    "image pull failure for the step with non-zero imagePullBackOff timeout",
+		reason:                  "ImagePullBackOff",
+		message:                 "Back-off pulling image \"whatever\"",
+		failure:                 "step",
+		imagePullBackOffTimeout: "5s",
+	}, {
+		desc:                    "image pull failure for the step with non-zero imagePullBackOff timeout and no pod",
+		reason:                  "ImagePullBackOff",
+		message:                 "pods \"pod-1\" not found",
+		failure:                 "step",
+		imagePullBackOffTimeout: "5m",
+		podNotFound:             true,
+	}, {
+		desc:                    "invalid image step with non-zero imagePullBackOff timeout",
+		reason:                  "InvalidImageName",
+		message:                 "Invalid image \"whatever\"",
+		failure:                 "step",
+		imagePullBackOffTimeout: "5h",
 	}} {
 		t.Run(tc.desc, func(t *testing.T) {
 			taskRun := parse.MustParseV1TaskRun(t, `
@@ -2694,11 +2777,12 @@ metadata:
 spec:
   taskSpec:
     sidecars:
-    - image: ubuntu
+    - image: docker.io/library/ubuntu:24.04
     - image: whatever
     steps:
     - image: alpine
 status:
+  podName: "pod-1"
   sidecars:
   - container: step-unnamed-0
     name: unnamed-0
@@ -2743,35 +2827,173 @@ status:
 				Type:    apis.ConditionSucceeded,
 				Status:  corev1.ConditionFalse,
 				Reason:  "TaskRunImagePullFailed",
-				Message: fmt.Sprintf(`The %s "unnamed-%d" in TaskRun "test-imagepull-fail" failed to pull the image "whatever". The pod errored with the message: "%s."`, tc.failure, stepNumber, tc.message),
+				Message: fmt.Sprintf(`the %s "unnamed-%d" in TaskRun "test-imagepull-fail" failed to pull the image "whatever". The pod errored with the message: "%s."`, tc.failure, stepNumber, tc.message),
 			}
 
 			wantEvents := []string{
 				"Normal Started ",
-				fmt.Sprintf(`Warning Failed The %s "unnamed-%d" in TaskRun "test-imagepull-fail" failed to pull the image "whatever". The pod errored with the message: "%s.`, tc.failure, stepNumber, tc.message),
+				fmt.Sprintf(`Warning Failed the %s "unnamed-%d" in TaskRun "test-imagepull-fail" failed to pull the image "whatever". The pod errored with the message: "%s.`, tc.failure, stepNumber, tc.message),
 			}
+
 			d := test.Data{
 				TaskRuns: []*v1.TaskRun{taskRun},
+			}
+			var timeout time.Duration
+			if tc.imagePullBackOffTimeout != "" {
+				timeout, _ = time.ParseDuration(tc.imagePullBackOffTimeout)
+				if timeout.Seconds() != 0 {
+					d.ConfigMaps = []*corev1.ConfigMap{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: config.GetDefaultsConfigName(), Namespace: system.Namespace()},
+							Data: map[string]string{
+								"default-imagepullbackoff-timeout": tc.imagePullBackOffTimeout,
+							},
+						},
+					}
+				}
+			}
+			if !tc.podNotFound {
+				timeoutCondition := corev1.PodConditionType("PodReadyToStartContainers")
+				if !tc.usePodRTSCondition {
+					timeoutCondition = corev1.PodInitialized
+				}
+				d.Pods = []*corev1.Pod{{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "foo"},
+					Status: corev1.PodStatus{
+						Conditions: []corev1.PodCondition{{
+							Type:               timeoutCondition,
+							LastTransitionTime: metav1.Time{Time: time.Now()},
+						}},
+					},
+				}}
 			}
 			testAssets, cancel := getTaskRunController(t, d)
 			defer cancel()
 			c := testAssets.Controller
 			clients := testAssets.Clients
 
-			if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err != nil {
-				t.Fatalf("Unexpected error when reconciling completed TaskRun : %v", err)
+			// for a step or a sidecar, controller must continue and retry podCreation with non-zero imagePullBackOff timeout
+			if tc.reason == "ImagePullBackOff" && timeout.Seconds() != 0 && !tc.podNotFound {
+				err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun))
+				if err == nil {
+					t.Errorf("expected error when reconciling completed TaskRun : %v", err)
+				}
+				if isRequeueError, requeueDuration := controller.IsRequeueKey(err); !isRequeueError {
+					t.Errorf("Expected requeue error, but got: %s", err.Error())
+				} else if requeueDuration < 0 {
+					t.Errorf("Expected a positive requeue duration but got %s", requeueDuration.String())
+				}
+				_, err = clients.Pipeline.TektonV1().TaskRuns(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Errorf("Expected completed TaskRun %s to exist but instead got error when getting it: %v", taskRun.Name, err)
+				}
+			} else {
+				if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err != nil {
+					t.Fatalf("Unexpected error when reconciling completed TaskRun : %v", err)
+				}
+				newTr, err := clients.Pipeline.TektonV1().TaskRuns(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("Expected completed TaskRun %s to exist but instead got error when getting it: %v", taskRun.Name, err)
+				}
+				// the error message includes the error if the pod is not found
+				if tc.podNotFound {
+					expectedStatus.Message = fmt.Sprintf(`the %s "unnamed-%d" in TaskRun "test-imagepull-fail" failed to pull the image "whatever" and the pod with error: "%s."`, tc.failure, stepNumber, tc.message)
+					wantEvents[1] = fmt.Sprintf(`Warning Failed the %s "unnamed-%d" in TaskRun "test-imagepull-fail" failed to pull the image "whatever" and the pod with error: "%s.`, tc.failure, stepNumber, tc.message)
+				}
+				condition := newTr.Status.GetCondition(apis.ConditionSucceeded)
+				if d := cmp.Diff(expectedStatus, condition, ignoreLastTransitionTime); d != "" {
+					t.Fatalf("Did not get expected condition %s", diff.PrintWantGot(d))
+				}
+				err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, taskRun.Name, wantEvents)
+				if err != nil {
+					t.Error(err.Error())
+				}
 			}
-			newTr, err := clients.Pipeline.TektonV1().TaskRuns(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name, metav1.GetOptions{})
+		})
+	}
+}
+
+func TestReconcileWithTimeoutDisabled(t *testing.T) {
+	type testCase struct {
+		name    string
+		taskRun *v1.TaskRun
+	}
+
+	testcases := []testCase{
+		{
+			name: "taskrun with timeout",
+			taskRun: parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-timeout
+  namespace: foo
+spec:
+  taskRef:
+    name: test-task
+  timeout: 10m
+status:
+  conditions:
+  - status: Unknown
+    type: Succeeded
+`),
+		}, {
+			name: "taskrun with default timeout",
+			taskRun: parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-default-timeout-60-minutes
+  namespace: foo
+spec:
+  taskRef:
+    name: test-task
+status:
+  conditions:
+  - status: Unknown
+    type: Succeeded
+`),
+		}, {
+			name: "task run with timeout set to 0 to disable",
+			taskRun: parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-timeout-disabled
+  namespace: foo
+spec:
+  taskRef:
+    name: test-task
+  timeout: 0s
+status:
+  conditions:
+  - status: Unknown
+    type: Succeeded
+`),
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := metav1.NewTime(time.Now())
+			tc.taskRun.Status.StartTime = &start
+			pod, err := makePod(tc.taskRun, simpleTask)
+			d := test.Data{
+				TaskRuns: []*v1.TaskRun{tc.taskRun},
+				Tasks:    []*v1.Task{simpleTask},
+				Pods:     []*corev1.Pod{pod},
+			}
+			testAssets, cancel := getTaskRunController(t, d)
+			defer cancel()
+			c := testAssets.Controller
+			clients := testAssets.Clients
+
+			err = c.Reconciler.Reconcile(testAssets.Ctx, getRunName(tc.taskRun))
+			if err == nil {
+				t.Errorf("expected error when reconciling completed TaskRun : %v", err)
+			}
+			if isRequeueError, requeueDuration := controller.IsRequeueKey(err); !isRequeueError {
+				t.Errorf("Expected requeue error, but got: %s", err.Error())
+			} else if requeueDuration < 0 {
+				t.Errorf("Expected a positive requeue duration but got %s", requeueDuration.String())
+			}
+			_, err = clients.Pipeline.TektonV1().TaskRuns(tc.taskRun.Namespace).Get(testAssets.Ctx, tc.taskRun.Name, metav1.GetOptions{})
 			if err != nil {
-				t.Fatalf("Expected completed TaskRun %s to exist but instead got error when getting it: %v", taskRun.Name, err)
-			}
-			condition := newTr.Status.GetCondition(apis.ConditionSucceeded)
-			if d := cmp.Diff(expectedStatus, condition, ignoreLastTransitionTime); d != "" {
-				t.Fatalf("Did not get expected condition %s", diff.PrintWantGot(d))
-			}
-			err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, taskRun.Name, wantEvents)
-			if err != nil {
-				t.Errorf(err.Error())
+				t.Errorf("Expected completed TaskRun %s to exist but instead got error when getting it: %v", tc.taskRun.Name, err)
 			}
 		})
 	}
@@ -2862,7 +3084,8 @@ status:
 			wantEvents: []string{
 				"Warning Failed ",
 			},
-		}}
+		},
+	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2888,7 +3111,7 @@ status:
 			}
 			err = k8sevent.CheckEventsOrdered(t, testAssets.Recorder.Events, tc.taskRun.Name, tc.wantEvents)
 			if !(err == nil) {
-				t.Errorf(err.Error())
+				t.Error(err.Error())
 			}
 		})
 	}
@@ -2932,6 +3155,411 @@ spec:
 	}
 }
 
+func TestPopulateParamsToWorkspaceBindingsClaimName(t *testing.T) {
+	taskRun := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings
+  namespace: foo
+spec:
+  params:
+    - name: myClaim
+      value: pvc-1
+  taskSpec:
+    steps:
+      - args:
+        - ""
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      persistentVolumeClaim:
+        claimName: $(params.myClaim)
+`)
+	d := test.Data{
+		TaskRuns: []*v1.TaskRun{taskRun},
+	}
+	testAssets, cancel := getTaskRunController(t, d)
+	defer cancel()
+	createServiceAccount(t, testAssets, "default", taskRun.Namespace)
+	c := testAssets.Controller
+	if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err == nil {
+		t.Fatalf("Could not reconcile the taskrun: %v", err)
+	}
+
+	pod, _ := testAssets.Clients.Kube.CoreV1().Pods(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name+"-pod", metav1.GetOptions{})
+
+	want := "pvc-1"
+	got := ""
+	for _, v := range pod.Spec.Volumes {
+		if v.PersistentVolumeClaim != nil {
+			got = v.PersistentVolumeClaim.ClaimName
+			break
+		}
+	}
+	if c := cmp.Diff(want, got); c != "" {
+		t.Errorf("TestPopulateParamsToWorkspaceBindings errored with: %s", diff.PrintWantGot(c))
+	}
+}
+
+func TestPopulateParamsToWorkspaceBindingsSubPath(t *testing.T) {
+	taskRun := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings
+  namespace: foo
+spec:
+  params:
+    - name: myClaim
+      value: pvc-1
+    - name: mySubPath
+      value: sub-1
+  taskSpec:
+    steps:
+      - args:
+        - "$(workspaces.ws-1.volume)/foo"
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      persistentVolumeClaim:
+        claimName: $(params.myClaim)
+      subPath: $(params.mySubPath)
+`)
+	d := test.Data{
+		TaskRuns: []*v1.TaskRun{taskRun},
+	}
+	testAssets, cancel := getTaskRunController(t, d)
+	defer cancel()
+	createServiceAccount(t, testAssets, "default", taskRun.Namespace)
+	c := testAssets.Controller
+	if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err == nil {
+		t.Fatalf("Could not reconcile the taskrun: %v", err)
+	}
+
+	pod, _ := testAssets.Clients.Kube.CoreV1().Pods(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name+"-pod", metav1.GetOptions{})
+
+	want := "sub-1"
+	got := ""
+	for _, container := range pod.Spec.Containers {
+		for _, mount := range container.VolumeMounts {
+			if mount.SubPath != "" {
+				got = mount.SubPath
+				break
+			}
+		}
+	}
+
+	if c := cmp.Diff(want, got); c != "" {
+		t.Errorf("TestPopulateParamsToWorkspaceBindingsSubPath errored with: %s", diff.PrintWantGot(c))
+	}
+}
+
+func TestPopulateParamsToWorkspaceBindingsConfigMapName(t *testing.T) {
+	taskRun := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings
+  namespace: foo
+spec:
+  params:
+    - name: myConfig
+      value: config-1
+  taskSpec:
+    steps:
+      - args:
+        - ""
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      configMap:
+        name: $(params.myConfig)
+`)
+	d := test.Data{
+		TaskRuns: []*v1.TaskRun{taskRun},
+	}
+	testAssets, cancel := getTaskRunController(t, d)
+	defer cancel()
+	createServiceAccount(t, testAssets, "default", taskRun.Namespace)
+	c := testAssets.Controller
+	if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err == nil {
+		t.Fatalf("Could not reconcile the taskrun: %v", err)
+	}
+
+	pod, _ := testAssets.Clients.Kube.CoreV1().Pods(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name+"-pod", metav1.GetOptions{})
+
+	want := "config-1"
+	got := ""
+
+	for _, v := range pod.Spec.Volumes {
+		if v.ConfigMap != nil {
+			got = v.ConfigMap.Name
+			break
+		}
+	}
+
+	if c := cmp.Diff(want, got); c != "" {
+		t.Errorf("TestPopulateParamsToWorkspaceBindingsConfigMapName errored with: %s", diff.PrintWantGot(c))
+	}
+}
+
+func TestPopulateParamsToWorkspaceBindingsSecretName(t *testing.T) {
+	taskRun := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings
+  namespace: foo
+spec:
+  params:
+    - name: mySecret
+      value: secret-1
+  taskSpec:
+    steps:
+      - args:
+        - ""
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      secret:
+        secretName: $(params.mySecret)
+`)
+	d := test.Data{
+		TaskRuns: []*v1.TaskRun{taskRun},
+	}
+	testAssets, cancel := getTaskRunController(t, d)
+	defer cancel()
+	createServiceAccount(t, testAssets, "default", taskRun.Namespace)
+	c := testAssets.Controller
+	if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err == nil {
+		t.Fatalf("Could not reconcile the taskrun: %v", err)
+	}
+
+	pod, _ := testAssets.Clients.Kube.CoreV1().Pods(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name+"-pod", metav1.GetOptions{})
+
+	want := "secret-1"
+	got := ""
+
+	for _, v := range pod.Spec.Volumes {
+		if v.Secret != nil {
+			got = v.Secret.SecretName
+			break
+		}
+	}
+
+	if c := cmp.Diff(want, got); c != "" {
+		t.Errorf("TestPopulateParamsToWorkspaceBindingsSecretName errored with: %s", diff.PrintWantGot(c))
+	}
+}
+
+func TestPopulateParamsToWorkspaceBindingsCSIDriver(t *testing.T) {
+	taskRun := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings
+  namespace: foo
+spec:
+  params:
+    - name: myDriver
+      value: driver-1
+  taskSpec:
+    steps:
+      - args:
+        - ""
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      csi:
+        driver: $(params.myDriver)
+`)
+	d := test.Data{
+		TaskRuns: []*v1.TaskRun{taskRun},
+	}
+	testAssets, cancel := getTaskRunController(t, d)
+	defer cancel()
+	createServiceAccount(t, testAssets, "default", taskRun.Namespace)
+	c := testAssets.Controller
+	if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err == nil {
+		t.Fatalf("Could not reconcile the taskrun: %v", err)
+	}
+
+	pod, _ := testAssets.Clients.Kube.CoreV1().Pods(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name+"-pod", metav1.GetOptions{})
+
+	want := "driver-1"
+	got := ""
+
+	for _, v := range pod.Spec.Volumes {
+		if v.CSI != nil {
+			got = v.CSI.Driver
+			break
+		}
+	}
+
+	if c := cmp.Diff(want, got); c != "" {
+		t.Errorf("TestPopulateParamsToWorkspaceBindingsCSIDriver errored with: %s", diff.PrintWantGot(c))
+	}
+}
+
+func TestPopulateParamsToWorkspaceBindingsCSINodePublishSecretRefName(t *testing.T) {
+	taskRun := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings
+  namespace: foo
+spec:
+  params:
+    - name: myRefName
+      value: ref-1
+  taskSpec:
+    steps:
+      - args:
+        - ""
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      csi:
+        driver: driver-1
+        nodePublishSecretRef:
+          name: $(params.myRefName)
+`)
+	d := test.Data{
+		TaskRuns: []*v1.TaskRun{taskRun},
+	}
+	testAssets, cancel := getTaskRunController(t, d)
+	defer cancel()
+	createServiceAccount(t, testAssets, "default", taskRun.Namespace)
+	c := testAssets.Controller
+	if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(taskRun)); err == nil {
+		t.Fatalf("Could not reconcile the taskrun: %v", err)
+	}
+
+	pod, _ := testAssets.Clients.Kube.CoreV1().Pods(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name+"-pod", metav1.GetOptions{})
+
+	want := "ref-1"
+	got := ""
+
+	for _, v := range pod.Spec.Volumes {
+		if v.CSI != nil {
+			got = v.CSI.NodePublishSecretRef.Name
+			break
+		}
+	}
+
+	if c := cmp.Diff(want, got); c != "" {
+		t.Errorf("TestPopulateParamsToWorkspaceBindingsCSINodePublishSecretRefName errored with: %s", diff.PrintWantGot(c))
+	}
+}
+
+func TestPopulateParamsToWorkspaceBindingsProjectedSources(t *testing.T) {
+	tests := []struct {
+		description string
+		taskRun     *v1.TaskRun
+		want        []corev1.VolumeProjection
+	}{
+		{
+			description: "taskrun propagating params to workspace bindings projected secret",
+			taskRun: parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings-projected-secret
+  namespace: foo
+spec:
+  params:
+    - name: mySecret
+      value: secret-1
+  taskSpec:
+    steps:
+      - args:
+        - ""
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      projected:
+        sources:
+          - secret:
+              name: $(params.mySecret)
+`),
+			want: []corev1.VolumeProjection{
+				{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "secret-1"}}},
+			},
+		},
+		{
+			description: "taskrun propagating params to workspace bindings projected configMap",
+			taskRun: parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-propagating-params-to-workspace-bindings-projected-configMap
+  namespace: foo
+spec:
+  params:
+    - name: myConfig
+      value: config-1
+  taskSpec:
+    steps:
+      - args:
+        - ""
+        command:
+          - echo
+        image: foo
+        name: simple-step
+  workspaces:
+    - name: ws-1
+      projected:
+        sources:
+          - configMap:
+              name: $(params.myConfig)
+`),
+			want: []corev1.VolumeProjection{
+				{ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{
+					Name: "config-1",
+				}}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.description, func(t *testing.T) {
+			d := test.Data{
+				TaskRuns: []*v1.TaskRun{tt.taskRun},
+			}
+			testAssets, cancel := getTaskRunController(t, d)
+			defer cancel()
+			createServiceAccount(t, testAssets, "default", tt.taskRun.Namespace)
+			c := testAssets.Controller
+			if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(tt.taskRun)); err == nil {
+				t.Fatalf("Could not reconcile the taskrun: %v", err)
+			}
+
+			list, _ := testAssets.Clients.Kube.CoreV1().Pods(tt.taskRun.Namespace).List(testAssets.Ctx, metav1.ListOptions{})
+			if len(list.Items) != 1 {
+				t.Fatalf("the result of list query shoud only contain 1 item.")
+			}
+
+			var got []corev1.VolumeProjection
+
+			for _, v := range list.Items[0].Spec.Volumes {
+				if v.Projected != nil {
+					got = v.Projected.Sources
+					break
+				}
+			}
+
+			if c := cmp.Diff(tt.want, got); c != "" {
+				t.Errorf("TestPopulateParamsToWorkspaceBindingsProjectedSources errored with: %s", diff.PrintWantGot(c))
+			}
+		})
+	}
+}
+
 func TestStepActionRef(t *testing.T) {
 	taskRun := parse.MustParseV1TaskRun(t, `
 metadata:
@@ -2949,7 +3577,7 @@ spec:
       - name: inlined-step
         image: "inlined-image"
 `)
-	stepAction := parse.MustParseV1alpha1StepAction(t, `
+	stepAction := parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction
   namespace: foo
@@ -2959,7 +3587,7 @@ spec:
   securityContext:
     privileged: true
 `)
-	stepAction2 := parse.MustParseV1alpha1StepAction(t, `
+	stepAction2 := parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction2
   namespace: foo
@@ -2969,7 +3597,7 @@ spec:
 `)
 	d := test.Data{
 		TaskRuns:    []*v1.TaskRun{taskRun},
-		StepActions: []*v1alpha1.StepAction{stepAction, stepAction2},
+		StepActions: []*v1beta1.StepAction{stepAction, stepAction2},
 		ConfigMaps: []*corev1.ConfigMap{
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: config.GetFeatureFlagsConfigName(), Namespace: system.Namespace()},
@@ -3059,7 +3687,7 @@ func TestStepActionRefParams(t *testing.T) {
 	tests := []struct {
 		name       string
 		taskRun    *v1.TaskRun
-		stepAction *v1alpha1.StepAction
+		stepAction *v1beta1.StepAction
 		want       []v1.Step
 	}{{
 		name: "params propagated from taskrun",
@@ -3089,7 +3717,7 @@ spec:
           - name: object-param
             value: $(params.objectparam[*])
 `),
-		stepAction: parse.MustParseV1alpha1StepAction(t, `
+		stepAction: parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction
   namespace: foo
@@ -3114,6 +3742,47 @@ spec:
 			Name:    "step1",
 		}},
 	}, {
+		name: "params with the same name propagated from taskrun and step",
+		taskRun: parse.MustParseV1TaskRun(t, `
+metadata:
+  name: taskrun-with-string-params
+  namespace: foo
+spec:
+  params:
+    - name: stringparam
+      value: "taskrun string param"
+  taskSpec:
+    steps:
+      - ref:
+          name: stepAction
+        name: step1
+        stdoutConfig: 
+          path: $(params.stringparam)
+        params:
+          - name: stringparam
+            value: "step string param"
+`),
+		stepAction: parse.MustParseV1beta1StepAction(t, `
+metadata:
+  name: stepAction
+  namespace: foo
+spec:
+  params:
+    - name: stringparam
+  image: myImage
+  command: ["echo"]
+  args: ["$(params.stringparam)"]
+`),
+		want: []v1.Step{{
+			Image:   "myImage",
+			Command: []string{"echo"},
+			Args:    []string{"step string param"},
+			Name:    "step1",
+			StdoutConfig: &v1.StepOutputConfig{
+				Path: "taskrun string param",
+			},
+		}},
+	}, {
 		name: "step results",
 		taskRun: parse.MustParseV1TaskRun(t, `
 metadata:
@@ -3126,7 +3795,7 @@ spec:
           name: stepAction
         name: step1
 `),
-		stepAction: parse.MustParseV1alpha1StepAction(t, `
+		stepAction: parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction
   namespace: foo
@@ -3143,6 +3812,34 @@ spec:
 			Args:    []string{"hi", ">>", "/tekton/steps/step-step1/results/result"},
 			Name:    "step1",
 			Results: []v1.StepResult{{Name: "result", Type: "string"}},
+		}},
+	}, {
+		name: "step artifacts",
+		taskRun: parse.MustParseV1TaskRun(t, `
+metadata:
+  name: taskrun-with-step-artifacts
+  namespace: foo
+spec:
+  taskSpec:
+    steps:
+      - ref:
+          name: stepAction
+        name: step1
+`),
+		stepAction: parse.MustParseV1beta1StepAction(t, `
+metadata:
+  name: stepAction
+  namespace: foo
+spec:
+  image: myImage
+  command: ["echo"]
+  args: ["hi", ">>", "$(step.artifacts.path)"]
+`),
+		want: []v1.Step{{
+			Image:   "myImage",
+			Command: []string{"echo"},
+			Args:    []string{"hi", ">>", "/tekton/steps/step-step1/artifacts/provenance.json"},
+			Name:    "step1",
 		}},
 	}, {
 		name: "params from taskspec",
@@ -3175,7 +3872,7 @@ spec:
           - name: object-param
             value: $(params.objectparam[*])
 `),
-		stepAction: parse.MustParseV1alpha1StepAction(t, `
+		stepAction: parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction
   namespace: foo
@@ -3212,7 +3909,7 @@ spec:
           name: stepAction
         name: step1
 `),
-		stepAction: parse.MustParseV1alpha1StepAction(t, `
+		stepAction: parse.MustParseV1beta1StepAction(t, `
 metadata:
   name: stepAction
   namespace: foo
@@ -3249,7 +3946,7 @@ spec:
 		t.Run(tt.name, func(t *testing.T) {
 			d := test.Data{
 				TaskRuns:    []*v1.TaskRun{tt.taskRun},
-				StepActions: []*v1alpha1.StepAction{tt.stepAction},
+				StepActions: []*v1beta1.StepAction{tt.stepAction},
 				ConfigMaps: []*corev1.ConfigMap{
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: config.GetFeatureFlagsConfigName(), Namespace: system.Namespace()},
@@ -3277,7 +3974,7 @@ spec:
 
 func TestExpandMountPath(t *testing.T) {
 	expectedMountPath := "/temppath/replaced"
-	expectedReplacedArgs := fmt.Sprintf("replacedArgs - %s", expectedMountPath)
+	expectedReplacedArgs := "replacedArgs - " + expectedMountPath
 	// The task's Workspace has a parameter variable
 	simpleTask := parse.MustParseV1Task(t, `
 metadata:
@@ -3361,13 +4058,12 @@ spec:
 	}
 
 	pod, err := r.createPod(testAssets.Ctx, taskSpec, taskRun, rtr, workspaceVolumes)
-
 	if err != nil {
 		t.Fatalf("create pod threw error %v", err)
 	}
 
-	if vm := pod.Spec.Containers[0].VolumeMounts[0]; !strings.HasPrefix(vm.Name, "ws-9l9zj") || vm.MountPath != expectedMountPath {
-		t.Fatalf("failed to find expanded Workspace mountpath %v", expectedMountPath)
+	if vm := pod.Spec.Containers[0].VolumeMounts[0]; !strings.HasPrefix(vm.Name, "ws-f888c") || vm.MountPath != expectedMountPath {
+		t.Fatalf("failed to find expanded Workspace mountpath %v for %v", expectedMountPath, vm.Name)
 	}
 
 	if a := pod.Spec.Containers[0].Args; a[len(a)-1] != expectedReplacedArgs {
@@ -3516,47 +4212,48 @@ status:
 		expectedType   apis.ConditionType
 		expectedStatus corev1.ConditionStatus
 		expectedReason string
-	}{{
-		description:    "ResourceQuotaConflictError does not fail taskrun",
-		err:            k8sapierrors.NewConflict(k8sruntimeschema.GroupResource{Group: "v1", Resource: "resourcequotas"}, "sample", errors.New("operation cannot be fulfilled on resourcequotas sample the object has been modified please apply your changes to the latest version and try again")),
-		expectedType:   apis.ConditionSucceeded,
-		expectedStatus: corev1.ConditionUnknown,
-		expectedReason: podconvert.ReasonPodPending,
-	}, {
-		description:    "exceeded quota errors are surfaced in taskrun condition but do not fail taskrun",
-		err:            k8sapierrors.NewForbidden(k8sruntimeschema.GroupResource{Group: "foo", Resource: "bar"}, "baz", errors.New("exceeded quota")),
-		expectedType:   apis.ConditionSucceeded,
-		expectedStatus: corev1.ConditionUnknown,
-		expectedReason: podconvert.ReasonExceededResourceQuota,
-	}, {
-		description:    "taskrun validation failed",
-		err:            errors.New("TaskRun validation failed"),
-		expectedType:   apis.ConditionSucceeded,
-		expectedStatus: corev1.ConditionFalse,
-		expectedReason: v1.TaskRunReasonFailedValidation.String(),
-	}, {
-		description:    "errors other than exceeded quota fail the taskrun",
-		err:            errors.New("this is a fatal error"),
-		expectedType:   apis.ConditionSucceeded,
-		expectedStatus: corev1.ConditionFalse,
-		expectedReason: podconvert.ReasonPodCreationFailed,
-	}, {
-		description: "errors violating PodSecurity fail the taskrun",
-		err: k8sapierrors.NewForbidden(k8sruntimeschema.GroupResource{Group: "foo", Resource: "bar"}, "baz",
-			errors.New("violates PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false ("+
-				"containers \"prepare\", \"place-scripts\", \"test-task\", \"test-task\" must set securityContext."+
-				"allowPrivilegeEscalation=false)")),
-		expectedType:   apis.ConditionSucceeded,
-		expectedStatus: corev1.ConditionFalse,
-		expectedReason: podconvert.ReasonPodAdmissionFailed,
-	}, {
-		description: "errors validating security context constraint (Openshift) fail the taskrun",
-		err: k8sapierrors.NewForbidden(k8sruntimeschema.GroupResource{Group: "foo", Resource: "bar"}, "baz",
-			errors.New("unable to validate against any security context constraint: [provider restricted: .spec.securityContext.hostNetwork: Invalid value: true: Host network is not allowed to be used provider restricted: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used")),
-		expectedType:   apis.ConditionSucceeded,
-		expectedStatus: corev1.ConditionFalse,
-		expectedReason: podconvert.ReasonPodAdmissionFailed,
-	},
+	}{
+		{
+			description:    "ResourceQuotaConflictError does not fail taskrun",
+			err:            k8sapierrors.NewConflict(k8sruntimeschema.GroupResource{Group: "v1", Resource: "resourcequotas"}, "sample", errors.New("operation cannot be fulfilled on resourcequotas sample the object has been modified please apply your changes to the latest version and try again")),
+			expectedType:   apis.ConditionSucceeded,
+			expectedStatus: corev1.ConditionUnknown,
+			expectedReason: podconvert.ReasonPodPending,
+		}, {
+			description:    "exceeded quota errors are surfaced in taskrun condition but do not fail taskrun",
+			err:            k8sapierrors.NewForbidden(k8sruntimeschema.GroupResource{Group: "foo", Resource: "bar"}, "baz", errors.New("exceeded quota")),
+			expectedType:   apis.ConditionSucceeded,
+			expectedStatus: corev1.ConditionUnknown,
+			expectedReason: podconvert.ReasonExceededResourceQuota,
+		}, {
+			description:    "taskrun validation failed",
+			err:            errors.New("TaskRun validation failed"),
+			expectedType:   apis.ConditionSucceeded,
+			expectedStatus: corev1.ConditionFalse,
+			expectedReason: v1.TaskRunReasonFailedValidation.String(),
+		}, {
+			description:    "errors other than exceeded quota fail the taskrun",
+			err:            errors.New("this is a fatal error"),
+			expectedType:   apis.ConditionSucceeded,
+			expectedStatus: corev1.ConditionFalse,
+			expectedReason: podconvert.ReasonPodCreationFailed,
+		}, {
+			description: "errors violating PodSecurity fail the taskrun",
+			err: k8sapierrors.NewForbidden(k8sruntimeschema.GroupResource{Group: "foo", Resource: "bar"}, "baz",
+				errors.New("violates PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false ("+
+					"containers \"prepare\", \"place-scripts\", \"test-task\", \"test-task\" must set securityContext."+
+					"allowPrivilegeEscalation=false)")),
+			expectedType:   apis.ConditionSucceeded,
+			expectedStatus: corev1.ConditionFalse,
+			expectedReason: podconvert.ReasonPodAdmissionFailed,
+		}, {
+			description: "errors validating security context constraint (Openshift) fail the taskrun",
+			err: k8sapierrors.NewForbidden(k8sruntimeschema.GroupResource{Group: "foo", Resource: "bar"}, "baz",
+				errors.New("unable to validate against any security context constraint: [provider restricted: .spec.securityContext.hostNetwork: Invalid value: true: Host network is not allowed to be used provider restricted: .spec.securityContext.hostPID: Invalid value: true: Host PID is not allowed to be used")),
+			expectedType:   apis.ConditionSucceeded,
+			expectedStatus: corev1.ConditionFalse,
+			expectedReason: podconvert.ReasonPodAdmissionFailed,
+		},
 	}
 	for _, tc := range testcases {
 		t.Run(tc.description, func(t *testing.T) {
@@ -3580,6 +4277,7 @@ status:
 		})
 	}
 }
+
 func TestReconcile_Single_SidecarState(t *testing.T) {
 	runningState := corev1.ContainerStateRunning{StartedAt: metav1.Time{Time: now}}
 	taskRun := parse.MustParseV1TaskRun(t, `
@@ -3715,7 +4413,7 @@ metadata:
   namespace: foo
 spec:
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task-with-workspace
 `)
 	d := test.Data{
@@ -3775,7 +4473,7 @@ metadata:
   namespace: foo
 spec:
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task-with-workspace
 `)
 	d := test.Data{
@@ -3839,7 +4537,7 @@ metadata:
   namespace: foo
 spec:
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task-with-workspace
 `)
 	d := test.Data{
@@ -3978,7 +4676,7 @@ metadata:
   namespace: foo
 spec:
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task-two-workspaces
   workspaces:
   - name: ws1
@@ -4075,7 +4773,7 @@ metadata:
   namespace: foo
 spec:
   taskRef:
-    apiVersion: a1
+    apiVersion: v1
     name: test-task-with-workspace
   workspaces:
   - name: ws1
@@ -4213,6 +4911,7 @@ status:
 		},
 		expectedStepStates: []v1.StepState{
 			{
+				TerminationReason: v1.TaskRunReasonCancelled.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4259,6 +4958,7 @@ status:
 		},
 		expectedStepStates: []v1.StepState{
 			{
+				TerminationReason: v1.TaskRunReasonCancelled.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4301,6 +5001,7 @@ status:
 		},
 		expectedStepStates: []v1.StepState{
 			{
+				TerminationReason: v1.TaskRunReasonTimedOut.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4358,6 +5059,7 @@ status:
 				},
 			},
 			{
+				TerminationReason: v1.TaskRunReasonTimedOut.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4367,6 +5069,7 @@ status:
 				},
 			},
 			{
+				TerminationReason: v1.TaskRunReasonTimedOut.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4413,6 +5116,7 @@ status:
 		},
 		expectedStepStates: []v1.StepState{
 			{
+				TerminationReason: v1.TaskRunReasonTimedOut.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4422,6 +5126,7 @@ status:
 				},
 			},
 			{
+				TerminationReason: v1.TaskRunReasonTimedOut.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4431,6 +5136,7 @@ status:
 				},
 			},
 			{
+				TerminationReason: v1.TaskRunReasonTimedOut.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4460,6 +5166,7 @@ status:
       finishedAt: "2022-01-01T00:00:00Z"
       reason: Completed
       startedAt: "2022-01-01T00:00:00Z"
+    terminationReason: Completed
   - running:
       startedAt: "2022-01-01T00:00:00Z"
 `),
@@ -4477,6 +5184,7 @@ status:
 		},
 		expectedStepStates: []v1.StepState{
 			{
+				TerminationReason: "Completed",
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 12,
@@ -4485,6 +5193,7 @@ status:
 				},
 			},
 			{
+				TerminationReason: v1.TaskRunReasonTimedOut.String(),
 				ContainerState: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 1,
@@ -4536,7 +5245,7 @@ status:
 				t.Fatal(err)
 			}
 			if d := cmp.Diff(&tc.expectedStatus, tc.taskRun.Status.GetCondition(apis.ConditionSucceeded), ignoreLastTransitionTime); d != "" {
-				t.Fatalf(diff.PrintWantGot(d))
+				t.Fatal(diff.PrintWantGot(d))
 			}
 
 			if tc.expectedStepStates != nil {
@@ -4594,7 +5303,7 @@ spec:
 		resolvedObjectMeta *resolutionutil.ResolvedObjectMeta
 	}
 
-	var tests = []struct {
+	tests := []struct {
 		name           string
 		reconcile1Args *args
 		reconcile2Args *args
@@ -4640,7 +5349,7 @@ spec:
 				t.Errorf("storePipelineSpec() error = %v", err)
 			}
 			if d := cmp.Diff(tc.wantTaskRun, tr); d != "" {
-				t.Fatalf(diff.PrintWantGot(d))
+				t.Fatal(diff.PrintWantGot(d))
 			}
 
 			// mock second reconcile
@@ -4648,7 +5357,7 @@ spec:
 				t.Errorf("storePipelineSpec() error = %v", err)
 			}
 			if d := cmp.Diff(tc.wantTaskRun, tr); d != "" {
-				t.Fatalf(diff.PrintWantGot(d))
+				t.Fatal(diff.PrintWantGot(d))
 			}
 		})
 	}
@@ -4673,10 +5382,10 @@ func Test_storeTaskSpec_metadata(t *testing.T) {
 		t.Errorf("storeTaskSpecAndMergeMeta error = %v", err)
 	}
 	if d := cmp.Diff(wantedlabels, tr.ObjectMeta.Labels); d != "" {
-		t.Fatalf(diff.PrintWantGot(d))
+		t.Fatal(diff.PrintWantGot(d))
 	}
 	if d := cmp.Diff(wantedannotations, tr.ObjectMeta.Annotations); d != "" {
-		t.Fatalf(diff.PrintWantGot(d))
+		t.Fatal(diff.PrintWantGot(d))
 	}
 }
 
@@ -4877,13 +5586,24 @@ status:
 }
 
 func TestStopSidecars_WithInjectedSidecarsNoTaskSpecSidecars(t *testing.T) {
+	sidecarTask := &v1.Task{
+		ObjectMeta: objectMeta("test-task-injected-sidecar", "foo"),
+		Spec: v1.TaskSpec{
+			Steps: []v1.Step{simpleStep},
+			Sidecars: []v1.Sidecar{{
+				Name:  "sidecar1",
+				Image: "image-id",
+			}},
+		},
+	}
+
 	taskRun := parse.MustParseV1TaskRun(t, `
 metadata:
   name: test-taskrun-injected-sidecars
   namespace: foo
 spec:
   taskRef:
-    name: test-task
+    name: test-task-injected-sidecar
 status:
   podName: test-taskrun-injected-sidecars-pod
   conditions:
@@ -4891,6 +5611,11 @@ status:
     reason: Build succeeded
     status: "True"
     type: Succeeded
+  sidecars:
+  - name: sidecar1
+    container: sidecar-sidecar1
+    running:
+      startedAt: "2000-01-01T01:01:01Z"
 `)
 
 	pod := &corev1.Pod{
@@ -4903,6 +5628,10 @@ status:
 				{
 					Name:  "step-do-something",
 					Image: "my-step-image",
+				},
+				{
+					Name:  "sidecar1",
+					Image: "image-id",
 				},
 				{
 					Name:  "injected-sidecar",
@@ -4918,6 +5647,10 @@ status:
 					State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{}},
 				},
 				{
+					Name:  "sidecar-sidecar1",
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				},
+				{
 					Name:  "injected-sidecar",
 					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 				},
@@ -4928,7 +5661,7 @@ status:
 	d := test.Data{
 		Pods:     []*corev1.Pod{pod},
 		TaskRuns: []*v1.TaskRun{taskRun},
-		Tasks:    []*v1.Task{simpleTask},
+		Tasks:    []*v1.Task{sidecarTask},
 	}
 
 	testAssets, cancel := getTaskRunController(t, d)
@@ -4948,13 +5681,26 @@ status:
 		t.Fatalf("error retrieving pod: %s", err)
 	}
 
-	if len(retrievedPod.Spec.Containers) != 2 {
+	if len(retrievedPod.Spec.Containers) != 3 {
 		t.Fatalf("expected pod with two containers")
 	}
 
 	// check that injected sidecar is replaced with nop image
-	if d := cmp.Diff(images.NopImage, retrievedPod.Spec.Containers[1].Image); d != "" {
+	if d := cmp.Diff(images.NopImage, retrievedPod.Spec.Containers[2].Image); d != "" {
 		t.Errorf("expected injected sidecar image to be replaced with nop image %s", diff.PrintWantGot(d))
+	}
+
+	// Get the updated TaskRun.
+	reconciledRun, err := clients.Pipeline.TektonV1().TaskRuns(taskRun.Namespace).Get(testAssets.Ctx, taskRun.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Error getting updated TaskRun after reconcile: %v", err)
+	}
+
+	// Verify that the injected sidecar isn't present in the TaskRun's status.
+	for _, sc := range reconciledRun.Status.Sidecars {
+		if sc.Container == "injected-sidecar" {
+			t.Errorf("expected not to find injected-sidecar in TaskRun status, but found %v", sc)
+		}
 	}
 }
 
@@ -4969,7 +5715,8 @@ func Test_validateTaskSpecRequestResources_ValidResources(t *testing.T) {
 				{
 					Image:   "image",
 					Command: []string{"cmd"},
-				}},
+				},
+			},
 			StepTemplate: &v1.StepTemplate{
 				ComputeResources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -5090,7 +5837,8 @@ func Test_validateTaskSpecRequestResources_InvalidResources(t *testing.T) {
 						corev1.ResourceMemory: resource.MustParse("4Gi"),
 					},
 				},
-			}}},
+			}},
+		},
 	}, {
 		name: "step request larger than steptemplate limit",
 		taskSpec: &v1.TaskSpec{
@@ -5131,7 +5879,7 @@ func podVolumeMounts(idx, totalSteps int) []corev1.VolumeMount {
 		MountPath: "/tekton/bin",
 		ReadOnly:  true,
 	})
-	for i := 0; i < totalSteps; i++ {
+	for i := range totalSteps {
 		mnts = append(mnts, corev1.VolumeMount{
 			Name:      fmt.Sprintf("tekton-internal-run-%d", i),
 			MountPath: filepath.Join("/tekton/run", strconv.Itoa(i)),
@@ -5165,6 +5913,10 @@ func podVolumeMounts(idx, totalSteps int) []corev1.VolumeMount {
 		Name:      "tekton-internal-steps",
 		MountPath: "/tekton/steps",
 		ReadOnly:  true,
+	})
+	mnts = append(mnts, corev1.VolumeMount{
+		Name:      "tekton-internal-artifacts",
+		MountPath: "/tekton/artifacts",
 	})
 
 	return mnts
@@ -5204,7 +5956,7 @@ func podArgs(cmd string, stdoutPath string, stderrPath string, additionalArgs []
 	return args
 }
 
-func podObjectMeta(name, taskName, taskRunName, ns string, isClusterTask bool) metav1.ObjectMeta {
+func podObjectMeta(name, taskName, taskRunName, taskRunUID, ns string, isClusterTask bool) metav1.ObjectMeta {
 	trueB := true
 	om := metav1.ObjectMeta{
 		Name:      name,
@@ -5214,6 +5966,7 @@ func podObjectMeta(name, taskName, taskRunName, ns string, isClusterTask bool) m
 		},
 		Labels: map[string]string{
 			pipeline.TaskRunLabelKey:       taskRunName,
+			pipeline.TaskRunUIDLabelKey:    taskRunUID,
 			"app.kubernetes.io/managed-by": "tekton-pipelines",
 		},
 		OwnerReferences: []metav1.OwnerReference{{
@@ -5222,6 +5975,7 @@ func podObjectMeta(name, taskName, taskRunName, ns string, isClusterTask bool) m
 			Controller:         &trueB,
 			BlockOwnerDeletion: &trueB,
 			APIVersion:         currentAPIVersion,
+			UID:                types.UID(taskRunUID),
 		}},
 	}
 
@@ -5248,18 +6002,19 @@ type stepForExpectedPod struct {
 	stderrPath      string
 }
 
-func expectedPod(podName, taskName, taskRunName, ns, saName string, isClusterTask bool, extraVolumes []corev1.Volume, steps []stepForExpectedPod) *corev1.Pod {
+func expectedPod(podName, taskName, taskRunName, taskRunUID, ns, saName string, isClusterTask bool, extraVolumes []corev1.Volume, steps []stepForExpectedPod) *corev1.Pod {
 	stepNames := make([]string, 0, len(steps))
 	for _, s := range steps {
-		stepNames = append(stepNames, fmt.Sprintf("step-%s", s.name))
+		stepNames = append(stepNames, "step-"+s.name)
 	}
 	p := &corev1.Pod{
-		ObjectMeta: podObjectMeta(podName, taskName, taskRunName, ns, isClusterTask),
+		ObjectMeta: podObjectMeta(podName, taskName, taskRunName, taskRunUID, ns, isClusterTask),
 		Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{
 				workspaceVolume,
 				homeVolume,
 				resultsVolume,
+				artifactsVolume,
 				stepsVolume,
 				binVolume,
 				downwardVolume,
@@ -5280,7 +6035,7 @@ func expectedPod(podName, taskName, taskRunName, ns, saName string, isClusterTas
 
 		stepContainer := corev1.Container{
 			Image:                  s.image,
-			Name:                   fmt.Sprintf("step-%s", s.name),
+			Name:                   "step-" + s.name,
 			Command:                []string{entrypointLocation},
 			VolumeMounts:           podVolumeMounts(idx, len(steps)),
 			TerminationMessagePath: "/tekton/termination",
@@ -5496,7 +6251,7 @@ spec:
 		}},
 	}
 
-	expectedErr := fmt.Errorf("1 error occurred:\n\t* param `param1` value: invalid is not in the enum list")
+	expectedErr := errors.New("1 error occurred:\n\t* param `param1` value: invalid is not in the enum list")
 	expectedFailureReason := "InvalidParamValue"
 	testAssets, cancel := getTaskRunController(t, d)
 	defer cancel()
@@ -5658,13 +6413,13 @@ status:
 		name:             "taskrun results type mismatched",
 		taskRun:          taskRunResultsTypeMismatched,
 		wantFailedReason: v1.TaskRunReasonFailedValidation.String(),
-		expectedError:    fmt.Errorf("1 error occurred:\n\t* Provided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\", \"objectResult\": task result is expected to be \"object\" type but was initialized to a different type \"string\""),
+		expectedError:    errors.New("1 error occurred:\n\t* Provided results don't match declared results; may be invalid JSON or missing result declaration:  \"aResult\": task result is expected to be \"array\" type but was initialized to a different type \"string\", \"objectResult\": task result is expected to be \"object\" type but was initialized to a different type \"string\""),
 		expectedResults:  nil,
 	}, {
 		name:             "taskrun results object miss key",
 		taskRun:          taskRunResultsObjectMissKey,
 		wantFailedReason: v1.TaskRunReasonFailedValidation.String(),
-		expectedError:    fmt.Errorf("1 error occurred:\n\t* missing keys for these results which are required in TaskResult's properties map[objectResult:[commit]]"),
+		expectedError:    errors.New("1 error occurred:\n\t* missing keys for these results which are required in TaskResult's properties map[objectResult:[commit]]"),
 		expectedResults: []v1.TaskRunResult{
 			{
 				Name:  "aResult",
@@ -5674,7 +6429,8 @@ status:
 				Name:  "objectResult",
 				Type:  "object",
 				Value: *v1.NewObject(map[string]string{"url": "abc"}),
-			}},
+			},
+		},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			testAssets, cancel := getTaskRunController(t, d)
@@ -5805,7 +6561,8 @@ spec:
 		},
 		Spec: v1alpha1.VerificationPolicySpec{
 			Resources: []v1alpha1.ResourcePattern{{Pattern: "no-match"}},
-		}}}
+		},
+	}}
 	// warnPolicy doesn't contain keys so it will fail verification but doesn't fail the run
 	warnPolicy := []*v1alpha1.VerificationPolicy{{
 		ObjectMeta: metav1.ObjectMeta{
@@ -5815,7 +6572,8 @@ spec:
 		Spec: v1alpha1.VerificationPolicySpec{
 			Resources: []v1alpha1.ResourcePattern{{Pattern: ".*"}},
 			Mode:      v1alpha1.ModeWarn,
-		}}}
+		},
+	}}
 	tr := parse.MustParseV1TaskRun(t, fmt.Sprintf(`
 metadata:
   name: test-taskrun
@@ -5851,27 +6609,28 @@ status:
 		noMatchPolicy                 string
 		verificationPolicies          []*v1alpha1.VerificationPolicy
 		wantTrustedResourcesCondition *apis.Condition
-	}{{
-		name:                          "ignore no match policy",
-		noMatchPolicy:                 config.IgnoreNoMatchPolicy,
-		verificationPolicies:          noMatchPolicy,
-		wantTrustedResourcesCondition: nil,
-	}, {
-		name:                          "warn no match policy",
-		noMatchPolicy:                 config.WarnNoMatchPolicy,
-		verificationPolicies:          noMatchPolicy,
-		wantTrustedResourcesCondition: failNoMatchCondition,
-	}, {
-		name:                          "pass enforce policy",
-		noMatchPolicy:                 config.FailNoMatchPolicy,
-		verificationPolicies:          vps,
-		wantTrustedResourcesCondition: passCondition,
-	}, {
-		name:                          "only fail warn policy",
-		noMatchPolicy:                 config.FailNoMatchPolicy,
-		verificationPolicies:          warnPolicy,
-		wantTrustedResourcesCondition: failNoKeysCondition,
-	},
+	}{
+		{
+			name:                          "ignore no match policy",
+			noMatchPolicy:                 config.IgnoreNoMatchPolicy,
+			verificationPolicies:          noMatchPolicy,
+			wantTrustedResourcesCondition: nil,
+		}, {
+			name:                          "warn no match policy",
+			noMatchPolicy:                 config.WarnNoMatchPolicy,
+			verificationPolicies:          noMatchPolicy,
+			wantTrustedResourcesCondition: failNoMatchCondition,
+		}, {
+			name:                          "pass enforce policy",
+			noMatchPolicy:                 config.FailNoMatchPolicy,
+			verificationPolicies:          vps,
+			wantTrustedResourcesCondition: passCondition,
+		}, {
+			name:                          "only fail warn policy",
+			noMatchPolicy:                 config.FailNoMatchPolicy,
+			verificationPolicies:          warnPolicy,
+			wantTrustedResourcesCondition: failNoKeysCondition,
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -6060,7 +6819,8 @@ spec:
 		},
 		Spec: v1alpha1.VerificationPolicySpec{
 			Resources: []v1alpha1.ResourcePattern{{Pattern: "no-match"}},
-		}}}
+		},
+	}}
 	// warnPolicy doesn't contain keys so it will fail verification but doesn't fail the run
 	warnPolicy := []*v1alpha1.VerificationPolicy{{
 		ObjectMeta: metav1.ObjectMeta{
@@ -6070,7 +6830,8 @@ spec:
 		Spec: v1alpha1.VerificationPolicySpec{
 			Resources: []v1alpha1.ResourcePattern{{Pattern: ".*"}},
 			Mode:      v1alpha1.ModeWarn,
-		}}}
+		},
+	}}
 	tr := parse.MustParseV1TaskRun(t, fmt.Sprintf(`
 metadata:
   name: test-taskrun
@@ -6106,27 +6867,28 @@ status:
 		noMatchPolicy                 string
 		verificationPolicies          []*v1alpha1.VerificationPolicy
 		wantTrustedResourcesCondition *apis.Condition
-	}{{
-		name:                          "ignore no match policy",
-		noMatchPolicy:                 config.IgnoreNoMatchPolicy,
-		verificationPolicies:          noMatchPolicy,
-		wantTrustedResourcesCondition: nil,
-	}, {
-		name:                          "warn no match policy",
-		noMatchPolicy:                 config.WarnNoMatchPolicy,
-		verificationPolicies:          noMatchPolicy,
-		wantTrustedResourcesCondition: failNoMatchCondition,
-	}, {
-		name:                          "pass enforce policy",
-		noMatchPolicy:                 config.FailNoMatchPolicy,
-		verificationPolicies:          vps,
-		wantTrustedResourcesCondition: passCondition,
-	}, {
-		name:                          "only fail warn policy",
-		noMatchPolicy:                 config.FailNoMatchPolicy,
-		verificationPolicies:          warnPolicy,
-		wantTrustedResourcesCondition: failNoKeysCondition,
-	},
+	}{
+		{
+			name:                          "ignore no match policy",
+			noMatchPolicy:                 config.IgnoreNoMatchPolicy,
+			verificationPolicies:          noMatchPolicy,
+			wantTrustedResourcesCondition: nil,
+		}, {
+			name:                          "warn no match policy",
+			noMatchPolicy:                 config.WarnNoMatchPolicy,
+			verificationPolicies:          noMatchPolicy,
+			wantTrustedResourcesCondition: failNoMatchCondition,
+		}, {
+			name:                          "pass enforce policy",
+			noMatchPolicy:                 config.FailNoMatchPolicy,
+			verificationPolicies:          vps,
+			wantTrustedResourcesCondition: passCondition,
+		}, {
+			name:                          "only fail warn policy",
+			noMatchPolicy:                 config.FailNoMatchPolicy,
+			verificationPolicies:          warnPolicy,
+			wantTrustedResourcesCondition: failNoKeysCondition,
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -6312,7 +7074,7 @@ func TestIsConcurrentModificationError(t *testing.T) {
 // the ResolutionRequest's name is generated by resolverName, namespace and runName.
 func getResolvedResolutionRequest(t *testing.T, resolverName string, resourceBytes []byte, namespace string, runName string) resolutionv1beta1.ResolutionRequest {
 	t.Helper()
-	name, err := remoteresource.GenerateDeterministicName(resolverName, namespace+"/"+runName, nil)
+	name, err := remoteresource.GenerateDeterministicNameFromSpec(resolverName, namespace+"/"+runName, &resolutionv1beta1.ResolutionRequestSpec{})
 	if err != nil {
 		t.Errorf("error generating name for %s/%s/%s: %v", resolverName, namespace, runName, err)
 	}
@@ -6344,7 +7106,7 @@ func getSignedV1Task(unsigned *v1.Task, signer signature.Signer, name string) (*
 
 func signInterface(signer signature.Signer, i interface{}) ([]byte, error) {
 	if signer == nil {
-		return nil, fmt.Errorf("signer is nil")
+		return nil, errors.New("signer is nil")
 	}
 	b, err := json.Marshal(i)
 	if err != nil {
@@ -6359,4 +7121,87 @@ func signInterface(signer signature.Signer, i interface{}) ([]byte, error) {
 	}
 
 	return sig, nil
+}
+
+func TestReconcile_TaskRun_UpdateLabelsAndAnnotations(t *testing.T) {
+	taskRunCompleted := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-completed
+  namespace: foo
+  annotations:
+    pipeline.tekton.dev/release: release-sha
+spec:
+  taskRef:
+    name: test-task
+status:
+  completionTime: "2024-01-23T09:55:17Z"
+  conditions:
+  - lastTransitionTime: "2024-01-23T09:55:17Z"
+    message: All Steps have completed executing
+    reason: Succeeded
+    status: "True"
+    type: Succeeded
+`)
+	taskRunCancelled := parse.MustParseV1TaskRun(t, `
+metadata:
+  name: test-taskrun-cancelled
+  namespace: foo
+  annotations:
+    pipeline.tekton.dev/release: release-sha
+spec:
+  status: TaskRunCancelled
+  taskRef:
+    name: test-task
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-23T11:19:24Z"
+    reason: Pending
+    status: Unknown
+    type: Succeeded
+`)
+	taskruns := []*v1.TaskRun{taskRunCompleted, taskRunCancelled}
+	d := test.Data{
+		TaskRuns: taskruns,
+		Tasks:    []*v1.Task{simpleTask},
+	}
+	for _, tc := range []struct {
+		name            string
+		taskRun         *v1.TaskRun
+		wantAnnotations map[string]string
+	}{{
+		name:    "completed",
+		taskRun: taskRunCompleted,
+		wantAnnotations: map[string]string{
+			// annotation not updated
+			"pipeline.tekton.dev/release": "release-sha",
+		},
+	}, {
+		name:    "cancelled",
+		taskRun: taskRunCancelled,
+		wantAnnotations: map[string]string{
+			// annotation updated
+			"pipeline.tekton.dev/release": "unknown",
+		},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			testAssets, cancel := getTaskRunController(t, d)
+			defer cancel()
+			c := testAssets.Controller
+			clients := testAssets.Clients
+
+			if err := c.Reconciler.Reconcile(testAssets.Ctx, getRunName(tc.taskRun)); err != nil {
+				t.Errorf("expected no error. Got error %v", err)
+			}
+
+			tr, err := clients.Pipeline.TektonV1().TaskRuns(tc.taskRun.Namespace).Get(testAssets.Ctx, tc.taskRun.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("getting updated taskrun: %v", err)
+			}
+
+			annotations := tr.GetAnnotations()
+			if d := cmp.Diff(tc.wantAnnotations, annotations); d != "" {
+				t.Errorf("TaskRun annotations doesn't match %s", diff.PrintWantGot(d))
+			}
+		})
+	}
 }

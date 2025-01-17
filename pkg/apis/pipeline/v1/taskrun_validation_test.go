@@ -18,11 +18,11 @@ package v1_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/tektoncd/pipeline/pkg/apis/config"
 	cfgtesting "github.com/tektoncd/pipeline/pkg/apis/config/testing"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/pod"
@@ -32,6 +32,7 @@ import (
 	corev1resources "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 )
 
 func TestTaskRun_Invalidate(t *testing.T) {
@@ -417,7 +418,7 @@ func TestTaskRun_Validate(t *testing.T) {
 		},
 		wc: cfgtesting.EnableAlphaAPIFields,
 	}, {
-		name: "alpha feature: valid step and sidecar specs",
+		name: "beta feature: valid step and sidecar specs",
 		taskRun: &v1.TaskRun{
 			ObjectMeta: metav1.ObjectMeta{Name: "tr"},
 			Spec: v1.TaskRunSpec{
@@ -436,7 +437,7 @@ func TestTaskRun_Validate(t *testing.T) {
 				}},
 			},
 		},
-		wc: cfgtesting.EnableAlphaAPIFields,
+		wc: cfgtesting.EnableBetaAPIFields,
 	}}
 	for _, ts := range tests {
 		t.Run(ts.name, func(t *testing.T) {
@@ -550,6 +551,42 @@ func TestTaskRunSpec_Invalidate(t *testing.T) {
 		},
 		wantErr: apis.ErrMultipleOneOf("taskRef", "taskSpec"),
 	}, {
+		name: "taskspec when inline disabled",
+		spec: v1.TaskRunSpec{
+			TaskSpec: &v1.TaskSpec{
+				Steps: []v1.Step{{
+					Name:  "mystep",
+					Image: "myimage",
+				}},
+			},
+		},
+		wantErr: apis.ErrDisallowedFields("taskSpec"),
+		wc: func(ctx context.Context) context.Context {
+			return config.ToContext(ctx, &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					DisableInlineSpec: "taskrun",
+				},
+			})
+		},
+	}, {
+		name: "taskspec when inline disabled all",
+		spec: v1.TaskRunSpec{
+			TaskSpec: &v1.TaskSpec{
+				Steps: []v1.Step{{
+					Name:  "mystep",
+					Image: "myimage",
+				}},
+			},
+		},
+		wantErr: apis.ErrDisallowedFields("taskSpec"),
+		wc: func(ctx context.Context) context.Context {
+			return config.ToContext(ctx, &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					DisableInlineSpec: "taskrun,pipelinerun,pipeline",
+				},
+			})
+		},
+	}, {
 		name: "negative pipeline timeout",
 		spec: v1.TaskRunSpec{
 			TaskRef: &v1.TaskRef{
@@ -558,6 +595,15 @@ func TestTaskRunSpec_Invalidate(t *testing.T) {
 			Timeout: &metav1.Duration{Duration: -48 * time.Hour},
 		},
 		wantErr: apis.ErrInvalidValue("-48h0m0s should be >= 0", "timeout"),
+	}, {
+		name: "negative pipeline retries",
+		spec: v1.TaskRunSpec{
+			TaskRef: &v1.TaskRef{
+				Name: "taskrefname",
+			},
+			Retries: -3,
+		},
+		wantErr: apis.ErrInvalidValue("-3 should be >= 0", "retries"),
 	}, {
 		name: "wrong taskrun cancel",
 		spec: v1.TaskRunSpec{
@@ -575,7 +621,7 @@ func TestTaskRunSpec_Invalidate(t *testing.T) {
 			},
 			StatusMessage: v1.TaskRunSpecStatusMessage(invalidStatusMessage),
 		},
-		wantErr: apis.ErrInvalidValue(fmt.Sprintf("statusMessage should not be set if status is not set, but it is currently set to %s", invalidStatusMessage), "statusMessage"),
+		wantErr: apis.ErrInvalidValue("statusMessage should not be set if status is not set, but it is currently set to "+invalidStatusMessage, "statusMessage"),
 	}, {
 		name: "invalid taskspec",
 		spec: v1.TaskRunSpec{
@@ -660,7 +706,36 @@ func TestTaskRunSpec_Invalidate(t *testing.T) {
 		wantErr: apis.ErrInvalidValue("turnOn is not a valid onFailure breakpoint value, onFailure breakpoint is only allowed to be set as enabled", "debug.breakpoints.onFailure"),
 		wc:      cfgtesting.EnableAlphaAPIFields,
 	}, {
-		name: "stepSpecs disallowed without alpha feature gate",
+		name: "invalid breakpoint duplicate before steps",
+		spec: v1.TaskRunSpec{
+			TaskRef: &v1.TaskRef{
+				Name: "my-task",
+			},
+			Debug: &v1.TaskRunDebug{
+				Breakpoints: &v1.TaskBreakpoints{
+					BeforeSteps: []string{"step-1", "step-1"},
+					OnFailure:   "enabled",
+				},
+			},
+		},
+		wantErr: apis.ErrGeneric("before step must be unique, the same step: step-1 is defined multiple times at", "debug.breakpoints.beforeSteps[1]"),
+		wc:      cfgtesting.EnableAlphaAPIFields,
+	}, {
+		name: "empty onFailure breakpoint",
+		spec: v1.TaskRunSpec{
+			TaskRef: &v1.TaskRef{
+				Name: "my-task",
+			},
+			Debug: &v1.TaskRunDebug{
+				Breakpoints: &v1.TaskBreakpoints{
+					OnFailure: "",
+				},
+			},
+		},
+		wantErr: apis.ErrInvalidValue("onFailure breakpoint is empty, it is only allowed to be set as enabled", "debug.breakpoints.onFailure"),
+		wc:      cfgtesting.EnableAlphaAPIFields,
+	}, {
+		name: "stepSpecs disallowed without beta feature gate",
 		spec: v1.TaskRunSpec{
 			TaskRef: &v1.TaskRef{
 				Name: "foo",
@@ -673,9 +748,9 @@ func TestTaskRunSpec_Invalidate(t *testing.T) {
 			}},
 		},
 		wc:      cfgtesting.EnableStableAPIFields,
-		wantErr: apis.ErrGeneric("stepSpecs requires \"enable-api-fields\" feature gate to be \"alpha\" but it is \"stable\""),
+		wantErr: apis.ErrGeneric("stepSpecs requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\""),
 	}, {
-		name: "sidecarSpec disallowed without alpha feature gate",
+		name: "sidecarSpec disallowed without beta feature gate",
 		spec: v1.TaskRunSpec{
 			TaskRef: &v1.TaskRef{
 				Name: "foo",
@@ -688,7 +763,7 @@ func TestTaskRunSpec_Invalidate(t *testing.T) {
 			}},
 		},
 		wc:      cfgtesting.EnableStableAPIFields,
-		wantErr: apis.ErrGeneric("sidecarSpecs requires \"enable-api-fields\" feature gate to be \"alpha\" but it is \"stable\""),
+		wantErr: apis.ErrGeneric("sidecarSpecs requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\""),
 	}, {
 		name: "duplicate stepSpecs names",
 		spec: v1.TaskRunSpec{
@@ -771,7 +846,7 @@ func TestTaskRunSpec_Invalidate(t *testing.T) {
 			"stepSpecs.resources",
 			"computeResources",
 		),
-		wc: cfgtesting.EnableAlphaAPIFields,
+		wc: cfgtesting.EnableBetaAPIFields,
 	}, {
 		name: "computeResources disallowed without beta feature gate",
 		spec: v1.TaskRunSpec{
@@ -821,6 +896,18 @@ func TestTaskRunSpec_Validate(t *testing.T) {
 		name: "no timeout",
 		spec: v1.TaskRunSpec{
 			Timeout: &metav1.Duration{Duration: 0},
+			TaskSpec: &v1.TaskSpec{
+				Steps: []v1.Step{{
+					Name:  "mystep",
+					Image: "myimage",
+				}},
+			},
+		},
+	}, {
+		name: "with positive retries",
+		spec: v1.TaskRunSpec{
+			Timeout: &metav1.Duration{Duration: 0},
+			Retries: 3,
 			TaskSpec: &v1.TaskSpec{
 				Steps: []v1.Step{{
 					Name:  "mystep",
@@ -899,73 +986,146 @@ func TestTaskRunSpec_Validate(t *testing.T) {
 	}
 }
 
-func TestTaskRunBetaFields(t *testing.T) {
+func TestTaskRunSpec_ValidateUpdate(t *testing.T) {
 	tests := []struct {
-		name string
-		spec v1.TaskSpec
-	}{{
-		name: "array param indexing",
-		spec: v1.TaskSpec{
-			Params: []v1.ParamSpec{{Name: "foo", Type: v1.ParamTypeArray}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo $(params.foo[1])`,
-			}},
+		name            string
+		isCreate        bool
+		isUpdate        bool
+		baselineTaskRun *v1.TaskRun
+		taskRun         *v1.TaskRun
+		expectedError   apis.FieldError
+	}{
+		{
+			name: "is create ctx",
+			taskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{},
+			},
+			isCreate:      true,
+			isUpdate:      false,
+			expectedError: apis.FieldError{},
+		}, {
+			name: "is update ctx, no changes",
+			baselineTaskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status: "TaskRunCancelled",
+				},
+			},
+			taskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status: "TaskRunCancelled",
+				},
+			},
+			isCreate:      false,
+			isUpdate:      true,
+			expectedError: apis.FieldError{},
+		}, {
+			name:            "is update ctx, baseline is nil, skip validation",
+			baselineTaskRun: nil,
+			taskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Timeout: &metav1.Duration{Duration: 1},
+				},
+			},
+			isCreate:      false,
+			isUpdate:      true,
+			expectedError: apis.FieldError{},
+		}, {
+			name: "is update ctx, baseline is unknown, only status changes",
+			baselineTaskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status:        "",
+					StatusMessage: "",
+				},
+				Status: v1.TaskRunStatus{
+					Status: duckv1.Status{
+						Conditions: duckv1.Conditions{
+							{Type: apis.ConditionSucceeded, Status: corev1.ConditionUnknown},
+						},
+					},
+				},
+			},
+			taskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status:        "TaskRunCancelled",
+					StatusMessage: "TaskRun is cancelled",
+				},
+			},
+			isCreate:      false,
+			isUpdate:      true,
+			expectedError: apis.FieldError{},
+		}, {
+			name: "is update ctx, baseline is unknown, status and timeout changes",
+			baselineTaskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status:        "",
+					StatusMessage: "",
+					Timeout:       &metav1.Duration{Duration: 0},
+				},
+				Status: v1.TaskRunStatus{
+					Status: duckv1.Status{
+						Conditions: duckv1.Conditions{
+							{Type: apis.ConditionSucceeded, Status: corev1.ConditionUnknown},
+						},
+					},
+				},
+			},
+			taskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status:        "TaskRunCancelled",
+					StatusMessage: "TaskRun is cancelled",
+					Timeout:       &metav1.Duration{Duration: 1},
+				},
+			},
+			isCreate: false,
+			isUpdate: true,
+			expectedError: apis.FieldError{
+				Message: `invalid value: Once the TaskRun has started, only status and statusMessage updates are allowed`,
+				Paths:   []string{""},
+			},
+		}, {
+			name: "is update ctx, baseline is done, status changes",
+			baselineTaskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status: "",
+				},
+				Status: v1.TaskRunStatus{
+					Status: duckv1.Status{
+						Conditions: duckv1.Conditions{
+							{Type: apis.ConditionSucceeded, Status: corev1.ConditionTrue},
+						},
+					},
+				},
+			},
+			taskRun: &v1.TaskRun{
+				Spec: v1.TaskRunSpec{
+					Status: "TaskRunCancelled",
+				},
+			},
+			isCreate: false,
+			isUpdate: true,
+			expectedError: apis.FieldError{
+				Message: `invalid value: Once the TaskRun is complete, no updates are allowed`,
+				Paths:   []string{""},
+			},
 		},
-	}, {
-		name: "object params",
-		spec: v1.TaskSpec{
-			Params: []v1.ParamSpec{{Name: "foo", Type: v1.ParamTypeObject, Properties: map[string]v1.PropertySpec{"bar": {Type: v1.ParamTypeString}}}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo $(params.foo.bar)`,
-			}},
-		},
-	}, {
-		name: "array results",
-		spec: v1.TaskSpec{
-			Results: []v1.TaskResult{{Name: "array-result", Type: v1.ResultsTypeArray}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo -n "[\"hello\",\"world\"]" | tee $(results.array-result.path)`,
-			}},
-		},
-	}, {
-		name: "object results",
-		spec: v1.TaskSpec{
-			Results: []v1.TaskResult{{Name: "object-result", Type: v1.ResultsTypeObject,
-				Properties: map[string]v1.PropertySpec{}}},
-			Steps: []v1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo -n "{\"hello\":\"world\"}" | tee $(results.object-result.path)`,
-			}},
-		},
-	}}
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := cfgtesting.EnableStableAPIFields(context.Background())
-			tr := v1.TaskRun{ObjectMeta: metav1.ObjectMeta{Name: "foo"}, Spec: v1.TaskRunSpec{
-				TaskSpec: &tt.spec,
-			}}
-			if err := tr.Validate(ctx); err == nil {
-				t.Errorf("no error when using beta field when `enable-api-fields` is stable")
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{},
+				Defaults:     &config.Defaults{},
+			})
+			if tt.isCreate {
+				ctx = apis.WithinCreate(ctx)
 			}
-
-			ctx = cfgtesting.EnableBetaAPIFields(context.Background())
-			if err := tr.Validate(ctx); err != nil {
-				t.Errorf("unexpected error when using beta field: %s", err)
+			if tt.isUpdate {
+				ctx = apis.WithinUpdate(ctx, tt.baselineTaskRun)
+			}
+			tr := tt.taskRun
+			err := tr.Spec.ValidateUpdate(ctx)
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("TaskRunSpec.ValidateUpdate() errors diff %s", diff.PrintWantGot(d))
 			}
 		})
 	}

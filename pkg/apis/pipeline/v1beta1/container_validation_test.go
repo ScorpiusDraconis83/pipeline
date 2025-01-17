@@ -21,11 +21,21 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/tektoncd/pipeline/pkg/apis/config"
 	cfgtesting "github.com/tektoncd/pipeline/pkg/apis/config/testing"
-	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
+	v1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/test/diff"
 	"knative.dev/pkg/apis"
 )
+
+func enableConciseResolverSyntax(ctx context.Context) context.Context {
+	return config.ToContext(ctx, &config.Config{
+		FeatureFlags: &config.FeatureFlags{
+			EnableConciseResolverSyntax: true,
+			EnableAPIFields:             config.BetaAPIFields,
+		},
+	})
+}
 
 func TestRef_Valid(t *testing.T) {
 	tests := []struct {
@@ -37,6 +47,10 @@ func TestRef_Valid(t *testing.T) {
 	}, {
 		name: "simple ref",
 		ref:  &v1beta1.Ref{Name: "refname"},
+	}, {
+		name: "ref name - consice syntax",
+		ref:  &v1beta1.Ref{Name: "foo://baz:ver", ResolverRef: v1beta1.ResolverRef{Resolver: "git"}},
+		wc:   enableConciseResolverSyntax,
 	}, {
 		name: "beta feature: valid resolver",
 		ref:  &v1beta1.Ref{ResolverRef: v1beta1.ResolverRef{Resolver: "git"}},
@@ -93,29 +107,45 @@ func TestRef_Invalid(t *testing.T) {
 		},
 		wantErr: apis.ErrMissingField("resolver"),
 	}, {
-		name: "ref resolver disallowed in conjunction with ref name",
+		name: "ref with resolver and k8s style name",
 		ref: &v1beta1.Ref{
 			Name: "foo",
 			ResolverRef: v1beta1.ResolverRef{
 				Resolver: "git",
 			},
 		},
-		wantErr: apis.ErrMultipleOneOf("name", "resolver"),
+		wantErr: apis.ErrInvalidValue(`invalid URI for request`, "name"),
+		wc:      enableConciseResolverSyntax,
 	}, {
-		name: "ref params disallowed in conjunction with ref name",
+		name: "ref with url-like name without resolver",
 		ref: &v1beta1.Ref{
-			Name: "bar",
+			Name: "https://foo.com/bar",
+		},
+		wantErr: apis.ErrMissingField("resolver"),
+		wc:      enableConciseResolverSyntax,
+	}, {
+		name: "ref params disallowed in conjunction with pipelineref name",
+		ref: &v1beta1.Ref{
+			Name: "https://foo/bar",
 			ResolverRef: v1beta1.ResolverRef{
-				Params: v1beta1.Params{{
-					Name: "foo",
-					Value: v1beta1.ParamValue{
-						Type:      v1beta1.ParamTypeString,
-						StringVal: "bar",
-					},
-				}},
+				Resolver: "git",
+				Params:   v1beta1.Params{{Name: "foo", Value: v1beta1.ParamValue{StringVal: "bar"}}},
 			},
 		},
-		wantErr: apis.ErrMultipleOneOf("name", "params").Also(apis.ErrMissingField("resolver")),
+		wantErr: apis.ErrMultipleOneOf("name", "params"),
+		wc:      enableConciseResolverSyntax,
+	}, {
+		name: "ref with url-like name without enable-concise-resolver-syntax",
+		ref:  &v1beta1.Ref{Name: "https://foo.com/bar"},
+		wantErr: apis.ErrMissingField("resolver").Also(&apis.FieldError{
+			Message: `feature flag enable-concise-resolver-syntax should be set to true to use concise resolver syntax`,
+		}),
+	}, {
+		name: "ref without enable-concise-resolver-syntax",
+		ref:  &v1beta1.Ref{Name: "https://foo.com/bar", ResolverRef: v1beta1.ResolverRef{Resolver: "git"}},
+		wantErr: &apis.FieldError{
+			Message: `feature flag enable-concise-resolver-syntax should be set to true to use concise resolver syntax`,
+		},
 	}, {
 		name: "invalid ref name",
 		ref:  &v1beta1.Ref{Name: "_foo"},
@@ -123,24 +153,6 @@ func TestRef_Invalid(t *testing.T) {
 			Message: `invalid value: name part must consist of alphanumeric characters, '-', '_' or '.', and must start and end with an alphanumeric character (e.g. 'MyName',  or 'my.name',  or '123-abc', regex used for validation is '([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]')`,
 			Paths:   []string{"name"},
 		},
-	}, {
-		name: "ref param object requires beta",
-		ref: &v1beta1.Ref{
-			ResolverRef: v1beta1.ResolverRef{
-				Resolver: "some-resolver",
-				Params: v1beta1.Params{{
-					Name: "foo",
-					Value: v1beta1.ParamValue{
-						Type:      v1beta1.ParamTypeObject,
-						ObjectVal: map[string]string{"bar": "baz"},
-					},
-				}},
-			},
-		},
-		wc: cfgtesting.EnableStableAPIFields,
-		wantErr: apis.ErrGeneric("resolver requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\"").Also(
-			apis.ErrGeneric("resolver params requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\"")).Also(
-			apis.ErrGeneric("object type parameter requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\"")),
 	}}
 	for _, ts := range tests {
 		t.Run(ts.name, func(t *testing.T) {

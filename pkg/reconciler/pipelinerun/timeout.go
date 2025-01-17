@@ -21,12 +21,14 @@ import (
 	"strings"
 	"time"
 
+	pipelineErrors "github.com/tektoncd/pipeline/pkg/apis/pipeline/errors"
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	clientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	"go.uber.org/zap"
 	"gomodules.xyz/jsonpatch/v2"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -92,6 +94,17 @@ func timeoutPipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *v1.P
 
 func timeoutCustomRun(ctx context.Context, customRunName string, namespace string, clientSet clientset.Interface) error {
 	_, err := clientSet.TektonV1beta1().CustomRuns(namespace).Patch(ctx, customRunName, types.JSONPatchType, timeoutCustomRunPatchBytes, metav1.PatchOptions{}, "")
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func timeoutTaskRun(ctx context.Context, taskRunName string, namespace string, clientSet clientset.Interface) error {
+	_, err := clientSet.TektonV1().TaskRuns(namespace).Patch(ctx, taskRunName, types.JSONPatchType, timeoutTaskRunPatchBytes, metav1.PatchOptions{}, "")
+	if errors.IsNotFound(err) {
+		return nil
+	}
 	return err
 }
 
@@ -110,19 +123,23 @@ func timeoutPipelineTasksForTaskNames(ctx context.Context, logger *zap.SugaredLo
 	}
 
 	for _, taskRunName := range trNames {
-		logger.Infof("cancelling TaskRun %s for timeout", taskRunName)
+		logger.Infof("patching TaskRun %s for timeout", taskRunName)
 
-		if _, err := clientSet.TektonV1().TaskRuns(pr.Namespace).Patch(ctx, taskRunName, types.JSONPatchType, timeoutTaskRunPatchBytes, metav1.PatchOptions{}, ""); err != nil {
-			errs = append(errs, fmt.Errorf("failed to patch TaskRun `%s` with cancellation: %w", taskRunName, err).Error())
+		if err := timeoutTaskRun(ctx, taskRunName, pr.Namespace, clientSet); err != nil {
+			if pipelineErrors.IsImmutableTaskRunSpecError(err) {
+				// The TaskRun may have completed and the spec field is immutable, we should ignore this error.
+				continue
+			}
+			errs = append(errs, fmt.Errorf("failed to patch TaskRun `%s` with timeout: %w", taskRunName, err).Error())
 			continue
 		}
 	}
 
 	for _, custonRunName := range customRunNames {
-		logger.Infof("cancelling CustomRun %s for timeout", custonRunName)
+		logger.Infof("patching CustomRun %s for timeout", custonRunName)
 
 		if err := timeoutCustomRun(ctx, custonRunName, pr.Namespace, clientSet); err != nil {
-			errs = append(errs, fmt.Errorf("failed to patch CustomRun `%s` with cancellation: %w", custonRunName, err).Error())
+			errs = append(errs, fmt.Errorf("failed to patch CustomRun `%s` with timeout: %w", custonRunName, err).Error())
 			continue
 		}
 	}

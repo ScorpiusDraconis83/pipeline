@@ -126,7 +126,7 @@ var (
 // Additionally, Step timeouts are added as entrypoint flag.
 func orderContainers(ctx context.Context, commonExtraEntrypointArgs []string, steps []corev1.Container, taskSpec *v1.TaskSpec, breakpointConfig *v1.TaskRunDebug, waitForReadyAnnotation, enableKeepPodOnCancel bool) ([]corev1.Container, error) {
 	if len(steps) == 0 {
-		return nil, errors.New("No steps specified")
+		return nil, errors.New("no steps specified")
 	}
 
 	for i, s := range steps {
@@ -171,13 +171,26 @@ func orderContainers(ctx context.Context, commonExtraEntrypointArgs []string, st
 				}
 				// add step results
 				stepResultArgs := stepResultArgument(taskSpec.Steps[i].Results)
+
 				argsForEntrypoint = append(argsForEntrypoint, stepResultArgs...)
+				if len(taskSpec.Steps[i].When) > 0 {
+					// marshal and pass to the entrypoint and unmarshal it there.
+					marshal, err := json.Marshal(taskSpec.Steps[i].When)
+
+					if err != nil {
+						return nil, fmt.Errorf("faile to resolve when %w", err)
+					}
+					argsForEntrypoint = append(argsForEntrypoint, "--when_expressions", string(marshal))
+				}
 			}
 			argsForEntrypoint = append(argsForEntrypoint, resultArgument(steps, taskSpec.Results)...)
 		}
 
 		if breakpointConfig != nil && breakpointConfig.NeedsDebugOnFailure() {
 			argsForEntrypoint = append(argsForEntrypoint, "-breakpoint_on_failure")
+		}
+		if breakpointConfig != nil && breakpointConfig.NeedsDebugBeforeStep(s.Name) {
+			argsForEntrypoint = append(argsForEntrypoint, "-debug_before_step")
 		}
 
 		cmd, args := s.Command, s.Args
@@ -338,12 +351,12 @@ func IsSidecarStatusRunning(tr *v1.TaskRun) bool {
 // represents a step.
 func IsContainerStep(name string) bool { return strings.HasPrefix(name, stepPrefix) }
 
-// isContainerSidecar returns true if the container name indicates that it
+// IsContainerSidecar returns true if the container name indicates that it
 // represents a sidecar.
-func isContainerSidecar(name string) bool { return strings.HasPrefix(name, sidecarPrefix) }
+func IsContainerSidecar(name string) bool { return strings.HasPrefix(name, sidecarPrefix) }
 
-// trimStepPrefix returns the container name, stripped of its step prefix.
-func trimStepPrefix(name string) string { return strings.TrimPrefix(name, stepPrefix) }
+// TrimStepPrefix returns the container name, stripped of its step prefix.
+func TrimStepPrefix(name string) string { return strings.TrimPrefix(name, stepPrefix) }
 
 // TrimSidecarPrefix returns the container name, stripped of its sidecar
 // prefix.
@@ -353,11 +366,12 @@ func TrimSidecarPrefix(name string) string { return strings.TrimPrefix(name, sid
 // returns "step-unnamed-<step-index>" if not specified
 func StepName(name string, i int) string {
 	if name != "" {
-		return getContainerName(name)
+		return GetContainerName(name)
 	}
 	return fmt.Sprintf("%sunnamed-%d", stepPrefix, i)
 }
 
-func getContainerName(name string) string {
+// GetContainerName prefixes the input name with "step-"
+func GetContainerName(name string) string {
 	return fmt.Sprintf("%s%s", stepPrefix, name)
 }

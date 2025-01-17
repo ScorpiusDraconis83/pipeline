@@ -22,10 +22,11 @@ import (
 	"fmt"
 
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	clientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	resolutionutil "github.com/tektoncd/pipeline/pkg/internal/resolution"
-	remoteresource "github.com/tektoncd/pipeline/pkg/resolution/resource"
+	"github.com/tektoncd/pipeline/pkg/pod"
+	remoteresource "github.com/tektoncd/pipeline/pkg/remoteresolution/resource"
 	"github.com/tektoncd/pipeline/pkg/trustedresources"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -42,7 +43,7 @@ type ResolvedTask struct {
 }
 
 // GetStepAction is a function used to retrieve StepActions.
-type GetStepAction func(context.Context, string) (*v1alpha1.StepAction, *v1.RefSource, error)
+type GetStepAction func(context.Context, string) (*v1beta1.StepAction, *v1.RefSource, error)
 
 // GetTask is a function used to retrieve Tasks.
 // VerificationResult is the result from trusted resources if the feature is enabled.
@@ -103,42 +104,74 @@ func GetTaskData(ctx context.Context, taskRun *v1.TaskRun, getTask GetTask) (*re
 // GetStepActionsData extracts the StepActions and merges them with the inlined Step specification.
 func GetStepActionsData(ctx context.Context, taskSpec v1.TaskSpec, taskRun *v1.TaskRun, tekton clientset.Interface, k8s kubernetes.Interface, requester remoteresource.Requester) ([]v1.Step, error) {
 	steps := []v1.Step{}
-	for _, step := range taskSpec.Steps {
+	for i, step := range taskSpec.Steps {
 		s := step.DeepCopy()
 		if step.Ref != nil {
 			getStepAction := GetStepActionFunc(tekton, k8s, requester, taskRun, s)
-			stepAction, _, err := getStepAction(ctx, s.Ref.Name)
+			stepAction, source, err := getStepAction(ctx, s.Ref.Name)
 			if err != nil {
 				return nil, err
+			}
+			// update stepstate with remote origin information
+			if source != nil {
+				found := false
+				for i, st := range taskRun.Status.Steps {
+					if st.Name == s.Name {
+						found = true
+						if st.Provenance != nil {
+							taskRun.Status.Steps[i].Provenance.RefSource = source
+						} else {
+							taskRun.Status.Steps[i].Provenance = &v1.Provenance{RefSource: source}
+						}
+						break
+					}
+				}
+				if !found {
+					stp := v1.StepState{
+						Name:       pod.TrimStepPrefix(pod.StepName(s.Name, i)),
+						Provenance: &v1.Provenance{RefSource: source},
+					}
+					if len(taskRun.Status.Steps) == 0 {
+						taskRun.Status.Steps = []v1.StepState{stp}
+					} else {
+						taskRun.Status.Steps = append(taskRun.Status.Steps, stp)
+					}
+				}
 			}
 			stepActionSpec := stepAction.StepActionSpec()
 			stepActionSpec.SetDefaults(ctx)
 
-			s.Image = stepActionSpec.Image
-			s.SecurityContext = stepActionSpec.SecurityContext
-			if len(stepActionSpec.Command) > 0 {
-				s.Command = stepActionSpec.Command
-			}
-			if len(stepActionSpec.Args) > 0 {
-				s.Args = stepActionSpec.Args
-			}
-			if stepActionSpec.Script != "" {
-				s.Script = stepActionSpec.Script
-			}
-			s.WorkingDir = stepActionSpec.WorkingDir
-			if stepActionSpec.Env != nil {
-				s.Env = stepActionSpec.Env
-			}
-			if len(stepActionSpec.VolumeMounts) > 0 {
-				s.VolumeMounts = stepActionSpec.VolumeMounts
-			}
-			if len(stepActionSpec.Results) > 0 {
-				s.Results = stepActionSpec.Results
-			}
+			stepFromStepAction := stepActionSpec.ToStep()
 			if err := validateStepHasStepActionParameters(s.Params, stepActionSpec.Params); err != nil {
 				return nil, err
 			}
-			s = applyStepActionParameters(s, &taskSpec, taskRun, s.Params, stepActionSpec.Params)
+
+			stepFromStepAction, err = applyStepActionParameters(stepFromStepAction, &taskSpec, taskRun, s.Params, stepActionSpec.Params)
+			if err != nil {
+				return nil, err
+			}
+
+			s.Image = stepFromStepAction.Image
+			s.SecurityContext = stepFromStepAction.SecurityContext
+			if len(stepFromStepAction.Command) > 0 {
+				s.Command = stepFromStepAction.Command
+			}
+			if len(stepFromStepAction.Args) > 0 {
+				s.Args = stepFromStepAction.Args
+			}
+			if stepFromStepAction.Script != "" {
+				s.Script = stepFromStepAction.Script
+			}
+			s.WorkingDir = stepFromStepAction.WorkingDir
+			if stepFromStepAction.Env != nil {
+				s.Env = stepFromStepAction.Env
+			}
+			if len(stepFromStepAction.VolumeMounts) > 0 {
+				s.VolumeMounts = stepFromStepAction.VolumeMounts
+			}
+			if len(stepFromStepAction.Results) > 0 {
+				s.Results = stepFromStepAction.Results
+			}
 			s.Params = nil
 			s.Ref = nil
 			steps = append(steps, *s)

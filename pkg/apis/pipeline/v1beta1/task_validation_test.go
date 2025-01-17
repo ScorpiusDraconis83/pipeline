@@ -18,6 +18,7 @@ package v1beta1_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -32,7 +33,9 @@ import (
 	"github.com/tektoncd/pipeline/test/diff"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/pointer"
 	"knative.dev/pkg/apis"
 )
 
@@ -335,6 +338,41 @@ func TestTaskSpecValidate(t *testing.T) {
 				#!/usr/bin/env bash
 				hello world`,
 			}},
+		},
+	}, {
+		name: "step template included in validation with stepaction",
+		fields: fields{
+			Steps: []v1beta1.Step{{
+				Name: "astep",
+				Ref: &v1beta1.Ref{
+					Name: "stepAction",
+				},
+			}},
+			StepTemplate: &v1beta1.StepTemplate{
+				Image: "some-image",
+				SecurityContext: &corev1.SecurityContext{
+					RunAsNonRoot: pointer.Bool(true),
+				},
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "data",
+					MountPath: "/workspace/data",
+				}},
+				Env: []corev1.EnvVar{{
+					Name:  "KEEP_THIS",
+					Value: "A_VALUE",
+				}, {
+					Name: "SOME_KEY_1",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							Key:                  "A_KEY",
+							LocalObjectReference: corev1.LocalObjectReference{Name: "A_NAME"},
+						},
+					},
+				}, {
+					Name:  "SOME_KEY_2",
+					Value: "VALUE_2",
+				}},
+			},
 		},
 	}, {
 		name: "valid step with parameterized script",
@@ -820,7 +858,7 @@ func TestTaskSpecValidateError(t *testing.T) {
 			Results: []v1beta1.TaskResult{{Name: "a-result"}},
 		},
 		expectedError: apis.FieldError{
-			Message: `non-existent variable in "\n\t\t\t\t#!/usr/bin/env bash\n\t\t\t\tdate | tee $(results.non-exist.path)"`,
+			Message: `non-existent variable ` + "`non-exist`" + ` in "\n\t\t\t\t#!/usr/bin/env bash\n\t\t\t\tdate | tee $(results.non-exist.path)"`,
 			Paths:   []string{"steps[0].script"},
 		},
 	}, {
@@ -1379,7 +1417,7 @@ func TestTaskSpecValidateError(t *testing.T) {
 			}},
 		},
 		expectedError: apis.FieldError{
-			Message: `non-existent variable in "\n\t\t\t\t#!/usr/bin/env  bash\n\t\t\t\thello \"$(context.task.missing)\""`,
+			Message: `non-existent variable ` + "`missing`" + ` in "\n\t\t\t\t#!/usr/bin/env  bash\n\t\t\t\thello \"$(context.task.missing)\""`,
 			Paths:   []string{"steps[0].script"},
 		},
 	}, {
@@ -1627,6 +1665,114 @@ func TestTaskSpecValidateErrorWithStepActionRef(t *testing.T) {
 					EnableStepActions: true,
 				},
 			})
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err == nil {
+				t.Fatalf("Expected an error, got nothing for %v", ts)
+			}
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("TaskSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestTaskSpecValidateErrorWithStepResultRef(t *testing.T) {
+	tests := []struct {
+		name          string
+		Steps         []v1beta1.Step
+		expectedError apis.FieldError
+	}{{
+		name: "Cannot reference step results in image",
+		Steps: []v1beta1.Step{{
+			Image: "$(steps.prevStep.results.resultName)",
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+			Paths:   []string{"steps[0].image"},
+		},
+	}, {
+		name: "Cannot reference step results in script",
+		Steps: []v1beta1.Step{{
+			Image:  "my-img",
+			Script: "echo $(steps.prevStep.results.resultName)",
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+			Paths:   []string{"steps[0].script"},
+		},
+	}, {
+		name: "Cannot reference step results in workingDir",
+		Steps: []v1beta1.Step{{
+			Image:      "my-img",
+			WorkingDir: "$(steps.prevStep.results.resultName)",
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+			Paths:   []string{"steps[0].workingDir"},
+		},
+	}, {
+		name: "Cannot reference step results in envFrom",
+		Steps: []v1beta1.Step{{
+			Image: "my-img",
+			EnvFrom: []corev1.EnvFromSource{{
+				Prefix: "$(steps.prevStep.results.resultName)",
+				ConfigMapRef: &corev1.ConfigMapEnvSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "$(steps.prevStep.results.resultName)",
+					},
+				},
+				SecretRef: &corev1.SecretEnvSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "$(steps.prevStep.results.resultName)",
+					},
+				},
+			}},
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+			Paths:   []string{"steps[0].envFrom.configMapRef", "steps[0].envFrom.prefix", "steps[0].envFrom.secretRef"},
+		},
+	}, {
+		name: "Cannot reference step results in VolumeMounts",
+		Steps: []v1beta1.Step{{
+			Image: "my-img",
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      "$(steps.prevStep.results.resultName)",
+				MountPath: "$(steps.prevStep.results.resultName)",
+				SubPath:   "$(steps.prevStep.results.resultName)",
+			}},
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+			Paths:   []string{"steps[0].volumeMounts.name", "steps[0].volumeMounts.mountPath", "steps[0].volumeMounts.subPath"},
+		},
+	}, {
+		name: "Cannot reference step results in VolumeDevices",
+		Steps: []v1beta1.Step{{
+			Image: "my-img",
+			VolumeDevices: []corev1.VolumeDevice{{
+				Name:       "$(steps.prevStep.results.resultName)",
+				DevicePath: "$(steps.prevStep.results.resultName)",
+			}},
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepResult substitutions are only allowed in env, command and args. Found usage in",
+			Paths:   []string{"steps[0].volumeDevices.name", "steps[0].volumeDevices.devicePath"},
+		},
+	},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1beta1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
 			ts.SetDefaults(ctx)
 			err := ts.Validate(ctx)
 			if err == nil {
@@ -1964,76 +2110,6 @@ func TestIncompatibleAPIVersions(t *testing.T) {
 	}
 }
 
-func TestTaskBetaFields(t *testing.T) {
-	tests := []struct {
-		name string
-		spec v1beta1.TaskSpec
-	}{{
-		name: "array param indexing",
-		spec: v1beta1.TaskSpec{
-			Params: []v1beta1.ParamSpec{{Name: "foo", Type: v1beta1.ParamTypeArray}},
-			Steps: []v1beta1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo $(params.foo[1])`,
-			}},
-		},
-	}, {
-		name: "object params",
-		spec: v1beta1.TaskSpec{
-			Params: []v1beta1.ParamSpec{{Name: "foo", Type: v1beta1.ParamTypeObject, Properties: map[string]v1beta1.PropertySpec{"bar": {Type: v1beta1.ParamTypeString}}}},
-			Steps: []v1beta1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo $(params.foo.bar)`,
-			}},
-		},
-	}, {
-		name: "array results",
-		spec: v1beta1.TaskSpec{
-			Results: []v1beta1.TaskResult{{Name: "array-result", Type: v1beta1.ResultsTypeArray}},
-			Steps: []v1beta1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo -n "[\"hello\",\"world\"]" | tee $(results.array-result.path)`,
-			}},
-		},
-	}, {
-		name: "object results",
-		spec: v1beta1.TaskSpec{
-			Results: []v1beta1.TaskResult{{Name: "object-result", Type: v1beta1.ResultsTypeObject,
-				Properties: map[string]v1beta1.PropertySpec{}}},
-			Steps: []v1beta1.Step{{
-				Name:  "my-step",
-				Image: "my-image",
-				Script: `
-					#!/usr/bin/env  bash
-					echo -n "{\"hello\":\"world\"}" | tee $(results.object-result.path)`,
-			}},
-		},
-	}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := cfgtesting.EnableStableAPIFields(context.Background())
-			task := v1beta1.Task{ObjectMeta: metav1.ObjectMeta{Name: "foo"}, Spec: tt.spec}
-			if err := task.Validate(ctx); err == nil {
-				t.Errorf("no error when using beta field when `enable-api-fields` is stable")
-			}
-
-			ctx = cfgtesting.EnableBetaAPIFields(context.Background())
-			if err := task.Validate(ctx); err != nil {
-				t.Errorf("unexpected error when using beta field: %s", err)
-			}
-		})
-	}
-}
-
 func TestGetArrayIndexParamRefs(t *testing.T) {
 	tcs := []struct {
 		name     string
@@ -2263,7 +2339,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("param default value v4 not in the enum list: params[param1]"),
+		expectedErr: errors.New("param default value v4 not in the enum list: params[param1]"),
 	}, {
 		name: "param enum with array type - failure",
 		params: []v1beta1.ParamSpec{{
@@ -2274,7 +2350,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("enum can only be set with string type param: params[param1]"),
+		expectedErr: errors.New("enum can only be set with string type param: params[param1]"),
 	}, {
 		name: "param enum with object type - failure",
 		params: []v1beta1.ParamSpec{{
@@ -2285,7 +2361,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("enum can only be set with string type param: params[param1]"),
+		expectedErr: errors.New("enum can only be set with string type param: params[param1]"),
 	}, {
 		name: "param enum with duplicate values - failure",
 		params: []v1beta1.ParamSpec{{
@@ -2296,7 +2372,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "true",
 		},
-		expectedErr: fmt.Errorf("parameter enum value v1 appears more than once: params[param1]"),
+		expectedErr: errors.New("parameter enum value v1 appears more than once: params[param1]"),
 	}, {
 		name: "param enum with feature flag disabled - failure",
 		params: []v1beta1.ParamSpec{{
@@ -2307,7 +2383,7 @@ func TestParamEnum_Failure(t *testing.T) {
 		configMap: map[string]string{
 			"enable-param-enum": "false",
 		},
-		expectedErr: fmt.Errorf("feature flag `enable-param-enum` should be set to true to use Enum: params[param1]"),
+		expectedErr: errors.New("feature flag `enable-param-enum` should be set to true to use Enum: params[param1]"),
 	}}
 
 	for _, tc := range tcs {
@@ -2490,7 +2566,7 @@ func TestTaskSpecValidate_StepResults_Error(t *testing.T) {
 			Results: []v1.StepResult{{Name: "a-result"}},
 		},
 		expectedError: apis.FieldError{
-			Message: `non-existent variable in "\n\t\t\t#!/usr/bin/env bash\n\t\t\tdate | tee $(results.non-exist.path)"`,
+			Message: "non-existent variable `non-exist` in \"\\n\\t\\t\\t#!/usr/bin/env bash\\n\\t\\t\\tdate | tee $(results.non-exist.path)\": steps[0].script\nnon-existent variable in \"\\n\\t\\t\\t#!/usr/bin/env bash\\n\\t\\t\\tdate | tee $(results.non-exist.path)\"",
 			Paths:   []string{"steps[0].script"},
 		},
 		enableStepActions: true,
@@ -2531,6 +2607,380 @@ func TestTaskSpecValidate_StepResults_Error(t *testing.T) {
 			}
 			ts.SetDefaults(ctx)
 			err := ts.Validate(ctx)
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("StepActionSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestTaskSpecValidateSuccessWithArtifactsRefFlagEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		Steps []v1beta1.Step
+	}{
+		{
+			name: "reference step artifacts in Env",
+			Steps: []v1beta1.Step{{
+				Image: "busybox",
+				Env:   []corev1.EnvVar{{Name: "AAA", Value: "$(steps.aaa.outputs.image)"}},
+			}},
+		},
+		{
+			name: "reference step artifacts path in Env",
+			Steps: []v1beta1.Step{{
+				Image: "busybox",
+				Env:   []corev1.EnvVar{{Name: "AAA", Value: "$(step.artifacts.path)"}},
+			}},
+		},
+		{
+			name: "reference step artifacts in Script",
+			Steps: []v1beta1.Step{{
+				Image:  "busybox",
+				Script: "echo $(steps.aaa.inputs.bbb)",
+			}},
+		},
+		{
+			name: "reference step artifacts path in Script",
+			Steps: []v1beta1.Step{{
+				Image:  "busybox",
+				Script: "echo 123 >> $(step.artifacts.path)",
+			}},
+		},
+		{
+			name: "reference step artifacts in Command",
+			Steps: []v1beta1.Step{{
+				Image:   "busybox",
+				Command: []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+		},
+		{
+			name: "reference step artifacts path in Command",
+			Steps: []v1beta1.Step{{
+				Image:   "busybox",
+				Command: []string{"echo", "$(step.artifacts.path)"},
+			}},
+		},
+		{
+			name: "reference step artifacts in Args",
+			Steps: []v1beta1.Step{{
+				Image: "busybox",
+				Args:  []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+		},
+		{
+			name: "reference step artifacts path in Args",
+			Steps: []v1beta1.Step{{
+				Image: "busybox",
+				Args:  []string{"echo", "$(step.artifacts.path)"},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1beta1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+					EnableArtifacts:   true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err != nil {
+				t.Fatalf("Expected no errors, got err for %v", err)
+			}
+		})
+	}
+}
+func TestTaskSpecValidateErrorWithArtifactsRefFlagNotEnabled(t *testing.T) {
+	tests := []struct {
+		name          string
+		Steps         []v1beta1.Step
+		expectedError apis.FieldError
+	}{
+		{
+			name: "Cannot reference step artifacts in Env without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Env: []corev1.EnvVar{{Name: "AAA", Value: "$(steps.aaa.outputs.image)"}},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in Env without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Env: []corev1.EnvVar{{Name: "AAA", Value: "$(step.artifacts.path)"}},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in Script without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Script: "echo $(steps.aaa.inputs.bbb)",
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in Script without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Script: "echo 123 >> $(step.artifacts.path)",
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in Command without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Command: []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in Command without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Command: []string{"echo", "$(step.artifacts.path)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in Args without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Args: []string{"echo", "$(steps.aaa.outputs.bbbb)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts path in CoArgsmmand without setting enable-artifacts to true",
+			Steps: []v1beta1.Step{{
+				Args: []string{"echo", "$(step.artifacts.path)"},
+			}},
+			expectedError: apis.FieldError{
+				Message: fmt.Sprintf("feature flag %s should be set to true to use artifacts feature.", config.EnableArtifacts),
+				Paths:   []string{"steps[0]"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1beta1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err == nil {
+				t.Fatalf("Expected an error, got nothing for %v", ts)
+			}
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("TaskSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestTaskSpecValidateErrorWithArtifactsRef(t *testing.T) {
+	tests := []struct {
+		name          string
+		Steps         []v1beta1.Step
+		expectedError apis.FieldError
+	}{{
+		name: "Cannot reference step artifacts in image",
+		Steps: []v1beta1.Step{{
+			Image: "$(steps.prevStep.outputs.aaa)",
+		}},
+		expectedError: apis.FieldError{
+			Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+			Paths:   []string{"steps[0].image"},
+		},
+	},
+		{
+			name: "Cannot reference step artifacts in workingDir",
+			Steps: []v1beta1.Step{{
+				Image:      "my-img",
+				WorkingDir: "$(steps.prevStep.outputs.aaa)",
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].workingDir"},
+			},
+		},
+		{
+			name: "Cannot reference step artifacts in envFrom",
+			Steps: []v1beta1.Step{{
+				Image: "my-img",
+				EnvFrom: []corev1.EnvFromSource{{
+					Prefix: "$(steps.prevStep.outputs.aaa)",
+					ConfigMapRef: &corev1.ConfigMapEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "$(steps.prevStep.outputs.aaa)",
+						},
+					},
+					SecretRef: &corev1.SecretEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "$(steps.prevStep.outputs.aaa)",
+						},
+					},
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].envFrom.configMapRef", "steps[0].envFrom.prefix", "steps[0].envFrom.secretRef"},
+			},
+		}, {
+			name: "Cannot reference step artifacts in VolumeMounts",
+			Steps: []v1beta1.Step{{
+				Image: "my-img",
+				VolumeMounts: []corev1.VolumeMount{{
+					Name:      "$(steps.prevStep.outputs.aaa)",
+					MountPath: "$(steps.prevStep.outputs.aaa)",
+					SubPath:   "$(steps.prevStep.outputs.aaa)",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].volumeMounts.name", "steps[0].volumeMounts.mountPath", "steps[0].volumeMounts.subPath"},
+			},
+		}, {
+			name: "Cannot reference step artifacts in VolumeDevices",
+			Steps: []v1beta1.Step{{
+				Image: "my-img",
+				VolumeDevices: []corev1.VolumeDevice{{
+					Name:       "$(steps.prevStep.outputs.aaa)",
+					DevicePath: "$(steps.prevStep.outputs.aaa)",
+				}},
+			}},
+			expectedError: apis.FieldError{
+				Message: "stepArtifact substitutions are only allowed in env, command, args and script. Found usage in",
+				Paths:   []string{"steps[0].volumeDevices.name", "steps[0].volumeDevices.devicePath"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := v1beta1.TaskSpec{
+				Steps: tt.Steps,
+			}
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions: true,
+				},
+			})
+			ctx = apis.WithinCreate(ctx)
+			ts.SetDefaults(ctx)
+			err := ts.Validate(ctx)
+			if err == nil {
+				t.Fatalf("Expected an error, got nothing for %v", ts)
+			}
+			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
+				t.Errorf("TaskSpec.Validate() errors diff %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+func TestTaskSpecValidate_StepWhen_Error(t *testing.T) {
+	tests := []struct {
+		name             string
+		ts               *v1beta1.TaskSpec
+		isCreate         bool
+		Results          []v1.StepResult
+		isUpdate         bool
+		baselineTaskRun  *v1beta1.TaskRun
+		expectedError    apis.FieldError
+		EnableStepAction bool
+		EnableCEL        bool
+	}{
+		{
+			name: "step when not allowed without enable step actions - create event",
+			ts: &v1beta1.TaskSpec{Steps: []v1beta1.Step{{
+				Image: "my-image",
+				When:  v1beta1.StepWhenExpressions{{Input: "foo", Operator: selection.In, Values: []string{"foo"}}},
+			}}},
+			isCreate: true,
+			expectedError: apis.FieldError{
+				Message: "feature flag enable-step-actions should be set to true in order to use When in Steps.",
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "step when not allowed without enable step actions - update and diverged event",
+			ts: &v1beta1.TaskSpec{Steps: []v1beta1.Step{{
+				Image: "my-image",
+				When:  v1beta1.StepWhenExpressions{{Input: "foo", Operator: selection.In, Values: []string{"foo"}}},
+			}}},
+			isUpdate: true,
+			baselineTaskRun: &v1beta1.TaskRun{
+				Spec: v1beta1.TaskRunSpec{
+					TaskSpec: &v1beta1.TaskSpec{
+						Steps: []v1beta1.Step{{
+							Image:   "my-image",
+							Results: []v1.StepResult{{Name: "a-result"}},
+						}},
+					},
+				},
+			},
+			expectedError: apis.FieldError{
+				Message: "feature flag enable-step-actions should be set to true in order to use When in Steps.",
+				Paths:   []string{"steps[0]"},
+			},
+		},
+		{
+			name: "cel not allowed if EnableCELInWhenExpression is false",
+			ts: &v1beta1.TaskSpec{Steps: []v1beta1.Step{{
+				Image: "my-image",
+				When:  v1beta1.StepWhenExpressions{{CEL: "'d'=='d'"}},
+			}}},
+			EnableStepAction: true,
+			expectedError: apis.FieldError{
+				Message: `feature flag enable-cel-in-whenexpression should be set to true to use CEL: 'd'=='d' in WhenExpression`,
+				Paths:   []string{"steps[0].when[0]"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := config.ToContext(context.Background(), &config.Config{
+				FeatureFlags: &config.FeatureFlags{
+					EnableStepActions:         tt.EnableStepAction,
+					EnableCELInWhenExpression: tt.EnableCEL,
+				},
+			})
+			if tt.isCreate {
+				ctx = apis.WithinCreate(ctx)
+			}
+			if tt.isUpdate {
+				ctx = apis.WithinUpdate(ctx, tt.baselineTaskRun)
+			}
+			tt.ts.SetDefaults(ctx)
+			err := tt.ts.Validate(ctx)
 			if d := cmp.Diff(tt.expectedError.Error(), err.Error(), cmpopts.IgnoreUnexported(apis.FieldError{})); d != "" {
 				t.Errorf("StepActionSpec.Validate() errors diff %s", diff.PrintWantGot(d))
 			}

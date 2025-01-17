@@ -15,12 +15,18 @@ package bundle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/resolution/resolver/framework"
+	"github.com/tektoncd/pipeline/pkg/resolution/resource"
 )
+
+// ParamServiceAccount is the parameter defining what service
+// account name to use for bundle requests.
+const ParamServiceAccount = "serviceAccount"
 
 // ParamImagePullSecret is the parameter defining what secret
 // name to use for bundle requests.
@@ -31,7 +37,7 @@ const ParamBundle = "bundle"
 
 // ParamName is the parameter defining what the layer name in the bundle
 // image is.
-const ParamName = "name"
+const ParamName = resource.ParamName
 
 // ParamKind is the parameter defining what the layer kind in the bundle
 // image is.
@@ -46,6 +52,18 @@ func OptionsFromParams(ctx context.Context, params []pipelinev1.Param) (RequestO
 	paramsMap := make(map[string]pipelinev1.ParamValue)
 	for _, p := range params {
 		paramsMap[p.Name] = p.Value
+	}
+
+	saVal, ok := paramsMap[ParamServiceAccount]
+	sa := ""
+	if !ok || saVal.StringVal == "" {
+		if saString, ok := conf[ConfigServiceAccount]; ok {
+			sa = saString
+		} else {
+			return opts, errors.New("default Service Account was not set during installation of the bundle resolver")
+		}
+	} else {
+		sa = saVal.StringVal
 	}
 
 	bundleVal, ok := paramsMap[ParamBundle]
@@ -67,12 +85,13 @@ func OptionsFromParams(ctx context.Context, params []pipelinev1.Param) (RequestO
 		if kindString, ok := conf[ConfigKind]; ok {
 			kind = kindString
 		} else {
-			return opts, fmt.Errorf("default resource Kind  was not set during installation of the bundle resolver")
+			return opts, errors.New("default resource Kind was not set during installation of the bundle resolver")
 		}
 	} else {
 		kind = kindVal.StringVal
 	}
 
+	opts.ServiceAccount = sa
 	opts.ImagePullSecret = paramsMap[ParamImagePullSecret].StringVal
 	opts.Bundle = bundleVal.StringVal
 	opts.EntryName = nameVal.StringVal

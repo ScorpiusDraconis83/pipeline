@@ -22,3 +22,4 @@ data:
   default-service-account: "tekton"
   default-managed-by-label-value: "something-else"
   default-resolver-type: "git"
+  default-imagepullbackoff-timeout: "5s"

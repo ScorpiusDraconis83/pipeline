@@ -26,10 +26,14 @@ SKIP_INITIALIZE=${SKIP_INITIALIZE:="false"}
 RUN_YAML_TESTS=${RUN_YAML_TESTS:="true"}
 SKIP_GO_E2E_TESTS=${SKIP_GO_E2E_TESTS:="false"}
 E2E_GO_TEST_TIMEOUT=${E2E_GO_TEST_TIMEOUT:="20m"}
+RUN_FEATUREFLAG_TESTS=${RUN_FEATUREFLAG_TESTS:="false"}
 RESULTS_FROM=${RESULTS_FROM:-termination-message}
 ENABLE_STEP_ACTIONS=${ENABLE_STEP_ACTIONS:="false"}
 ENABLE_CEL_IN_WHENEXPRESSION=${ENABLE_CEL_IN_WHENEXPRESSION:="false"}
 ENABLE_PARAM_ENUM=${ENABLE_PARAM_ENUM:="false"}
+ENABLE_ARTIFACTS=${ENABLE_ARTIFACTS:="false"}
+ENABLE_CONCISE_RESOLVER_SYNTAX=${ENABLE_CONCISE_RESOLVER_SYNTAX:="false"}
+ENABLE_KUBERNETES_SIDECAR=${ENABLE_KUBERNETES_SIDECAR:="false"}
 failed=0
 
 # Script entry point.
@@ -40,7 +44,10 @@ fi
 
 header "Setting up environment"
 
+set -x
 install_pipeline_crd
+export SYSTEM_NAMESPACE=tekton-pipelines
+set +x
 
 failed=0
 
@@ -115,6 +122,42 @@ function set_enable_param_enum() {
   kubectl patch configmap feature-flags -n tekton-pipelines -p "$jsonpatch"
 }
 
+function set_enable_artifacts() {
+  local method="$1"
+  if [ "$method" != "false" ] && [ "$method" != "true" ]; then
+    printf "Invalid value for enable-artifacts %s\n" ${method}
+    exit 255
+  fi
+  printf "Setting enable-artifacts to %s\n", ${method}
+  jsonpatch=$(printf "{\"data\": {\"enable-artifacts\": \"%s\"}}" $1)
+  echo "feature-flags ConfigMap patch: ${jsonpatch}"
+  kubectl patch configmap feature-flags -n tekton-pipelines -p "$jsonpatch"
+}
+
+function set_enable_concise_resolver_syntax() {
+  local method="$1"
+  if [ "$method" != "false" ] && [ "$method" != "true" ]; then
+    printf "Invalid value for enable-concise-resolver-syntax %s\n" ${method}
+    exit 255
+  fi
+  printf "Setting enable-concise-resolver-syntax to %s\n", ${method}
+  jsonpatch=$(printf "{\"data\": {\"enable-concise-resolver-syntax\": \"%s\"}}" $1)
+  echo "feature-flags ConfigMap patch: ${jsonpatch}"
+  kubectl patch configmap feature-flags -n tekton-pipelines -p "$jsonpatch"
+}
+
+function set_enable_kubernetes_sidecar() {
+  local method="$1"
+  if [ "$method" != "false" ] && [ "$method" != "true" ]; then
+    printf "Invalid value for enable-kubernetes-sidecar %s\n" ${method}
+    exit 255
+  fi
+  printf "Setting enable-kubernetes-sidecar to %s\n", ${method}
+  jsonpatch=$(printf "{\"data\": {\"enable-kubernetes-sidecar\": \"%s\"}}" $1)
+  echo "feature-flags ConfigMap patch: ${jsonpatch}"
+  kubectl patch configmap feature-flags -n tekton-pipelines -p "$jsonpatch"
+}
+
 function run_e2e() {
   # Run the integration tests
   header "Running Go e2e tests"
@@ -129,6 +172,10 @@ function run_e2e() {
   if [ "${RUN_YAML_TESTS}" == "true" ]; then
     go_test_e2e -mod=readonly -tags=examples -timeout=${E2E_GO_TEST_TIMEOUT} ./test/ || failed=1
   fi
+
+  if [ "${RUN_FEATUREFLAG_TESTS}" == "true" ]; then
+    go_test_e2e -mod=readonly -tags=featureflags -timeout=${E2E_GO_TEST_TIMEOUT} ./test/ || failed=1
+  fi
 }
 
 add_spire "$PIPELINE_FEATURE_GATE"
@@ -137,6 +184,9 @@ set_result_extraction_method "$RESULTS_FROM"
 set_enable_step_actions "$ENABLE_STEP_ACTIONS"
 set_cel_in_whenexpression "$ENABLE_CEL_IN_WHENEXPRESSION"
 set_enable_param_enum "$ENABLE_PARAM_ENUM"
+set_enable_artifacts "$ENABLE_ARTIFACTS"
+set_enable_concise_resolver_syntax "$ENABLE_CONCISE_RESOLVER_SYNTAX"
+set_enable_kubernetes_sidecar "$ENABLE_KUBERNETES_SIDECAR"
 run_e2e
 
 (( failed )) && fail_test

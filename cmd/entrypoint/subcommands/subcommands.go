@@ -29,18 +29,8 @@ func (err OK) Error() string {
 	return err.message
 }
 
-// SubcommandSuccessful is an alias for the OK type.
-//
-// Deprecated: replace usage with OK type.
-type SubcommandSuccessful = OK
-
-var (
-	// Compile-time check that OK is an error type.
-	_ error = OK{}
-	// Compile-time check that objects of type OK are cast to deprecated
-	// SubcommandSuccessful type.
-	_ SubcommandSuccessful = OK{}
-)
+// Compile-time check that OK is an error type.
+var _ error = OK{}
 
 // SubcommandError is returned for failed subcommand executions.
 type SubcommandError struct {
@@ -95,7 +85,7 @@ func Process(args []string) error {
 			if err := decodeScript(src); err != nil {
 				return SubcommandError{subcommand: DecodeScriptCommand, message: err.Error()}
 			}
-			return OK{message: fmt.Sprintf("Decoded script %s", src)}
+			return OK{message: "Decoded script " + src}
 		}
 	case StepInitCommand:
 		if err := stepInit(args[1:]); err != nil {

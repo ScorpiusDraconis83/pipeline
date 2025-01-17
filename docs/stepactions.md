@@ -18,11 +18,10 @@ weight: 201
   - [Declaring VolumeMounts](#declaring-volumemounts)
   - [Referencing a StepAction](#referencing-a-stepaction)
     - [Specifying Remote StepActions](#specifying-remote-stepactions)
-- [Known Limitations](#known-limitations)
-  - [Cannot pass Step Results between Steps](#cannot-pass-step-results-between-steps)
+  - [Controlling Step Execution with when Expressions](#controlling-step-execution-with-when-expressions)
 
 ## Overview
-> :seedling: **`StepActions` is an [alpha](additional-configs.md#alpha-features) feature.**
+> :seedling: **`StepActions` is an [beta](additional-configs.md#beta-features) feature.**
 > The `enable-step-actions` feature flag must be set to `"true"` to specify a `StepAction` in a `Step`.
 
 A `StepAction` is the reusable and scriptable unit of work that is performed by a `Step`.
@@ -62,7 +61,7 @@ A `StepAction` definition supports the following fields:
 The example below demonstrates the use of most of the above-mentioned fields:
 
 ```yaml
-apiVersion: tekton.dev/v1alpha1
+apiVersion: tekton.dev/v1beta1
 kind: StepAction
 metadata:
   name: example-stepaction-name
@@ -82,7 +81,7 @@ Like with `Tasks`, a `StepAction` must declare all the parameters that it uses. 
  `Parameters` are passed to the `StepAction` from its corresponding `Step` referencing it.
 
 ```yaml
-apiVersion: tekton.dev/v1alpha1
+apiVersion: tekton.dev/v1beta1
 kind: StepAction
 metadata:
   name: stepaction-using-params
@@ -108,6 +107,9 @@ spec:
     "$(params.flags[*])",
   ]
 ```
+
+> :seedling: **`params` cannot be directly used in a `script` in `StepActions`.**
+> Directly substituting `params` in `scripts` makes the workload prone to shell attacks. Therefore, we do not allow direct usage of `params` in `scripts` in `StepActions`. Instead, rely on passing `params` to `env` variables and reference them in `scripts`. We cannot do the same for `inlined-steps` because it breaks `v1 API` compatibility for existing users.
 
 #### Passing Params to StepAction
 
@@ -156,7 +158,7 @@ spec:
     date | tee $(results.current-date-human-readable.path)
 ```
 
-It is possible that a `StepAction` with `Results` is used multiple times in the same `Task` or multiple `StepActions` in the same `Task` produce `Results` with the same name. Resolving the `Result` names becomes critical otherwise there could be unexpected outcomes. The `Task` needs to be able to resolve these `Result` names clashes by mapping it to a different `Result` name. For this reason, we introduce the capability to store results on a `Step` level. 
+It is possible that a `StepAction` with `Results` is used multiple times in the same `Task` or multiple `StepActions` in the same `Task` produce `Results` with the same name. Resolving the `Result` names becomes critical otherwise there could be unexpected outcomes. The `Task` needs to be able to resolve these `Result` names clashes by mapping it to a different `Result` name. For this reason, we introduce the capability to store results on a `Step` level.
 
 `StepActions` can also emit `Results` to `$(step.results.<resultName>.path)`.
 
@@ -178,7 +180,7 @@ spec:
     date | tee $(step.results.current-date-human-readable.path)
 ```
 
-`Results` from the above `StepAction` can be [fetched by the `Task`](#fetching-emitted-results-from-stepactions) in another `StepAction` via `$(steps.<stepName>.results.<resultName>)`.
+`Results` from the above `StepAction` can be [fetched by the `Task`](#fetching-emitted-results-from-stepactions) or in [another `Step/StepAction`](#passing-step-results-between-steps) via `$(steps.<stepName>.results.<resultName>)`.
 
 #### Fetching Emitted Results from StepActions
 
@@ -235,6 +237,63 @@ spec:
         name: kaniko-step-action
 ```
 
+#### Passing Results between Steps
+
+`StepResults` (i.e. results written to `$(step.results.<result-name>.path)`, NOT `$(results.<result-name>.path)`) can be shared with following steps via replacement variable `$(steps.<step-name>.results.<result-name>)`.
+
+Pipeline supports two new types of results and parameters: array `[]string` and object `map[string]string`.
+
+| Result Type | Parameter Type | Specification                                    | `enable-api-fields` |
+|-------------|----------------|--------------------------------------------------|---------------------|
+| string      | string         | `$(steps.<step-name>.results.<result-name>)`     | stable              |
+| array       | array          | `$(steps.<step-name>.results.<result-name>[*])`  | alpha or beta       |
+| array       | string         | `$(steps.<step-name>.results.<result-name>[i])`  | alpha or beta       |
+| object      | string         | `$(tasks.<task-name>.results.<result-name>.key)` | alpha or beta       |
+
+**Note:** Whole Array `Results` (using star notation) cannot be referred in `script` and `env`.
+
+The example below shows how you could pass `step results` from a `step` into following steps, in this case, into a `StepAction`.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: step-action-run
+spec:
+  TaskSpec:
+    steps:
+      - name: inline-step
+        results:
+          - name: result1
+            type: array
+          - name: result2
+            type: string
+          - name: result3
+            type: object
+            properties:
+              IMAGE_URL:
+                type: string
+              IMAGE_DIGEST:
+                type: string
+        image: alpine
+        script: |
+          echo -n "[\"image1\", \"image2\", \"image3\"]" | tee $(step.results.result1.path)
+          echo -n "foo" | tee $(step.results.result2.path)
+          echo -n "{\"IMAGE_URL\":\"ar.com\", \"IMAGE_DIGEST\":\"sha234\"}" | tee $(step.results.result3.path)
+      - name: action-runner
+        ref:
+          name: step-action
+        params:
+          - name: param1
+            value: $(steps.inline-step.results.result1[*])
+          - name: param2
+            value: $(steps.inline-step.results.result2)
+          - name: param3
+            value: $(steps.inline-step.results.result3[*])
+```
+
+**Note:** `Step Results` can only be referenced in a `Step's/StepAction's` `env`, `command` and `args`. Referencing in any other field will throw an error.
+
 ### Declaring WorkingDir
 
 You can declare `workingDir` in a `StepAction`:
@@ -253,7 +312,7 @@ spec:
 ```
 
 The `Task` using the `StepAction` has more context about how the `Steps` have been orchestrated. As such, the `Task` should be able to update the `workingDir` of the `StepAction` so that the `StepAction` is executed from the correct location.
-The `StepAction` can parametrize the `workingDir` and work relative to it. This way, the `Task` does not really need control over the workingDir, it just needs to pass the path as a parameter. 
+The `StepAction` can parametrize the `workingDir` and work relative to it. This way, the `Task` does not really need control over the workingDir, it just needs to pass the path as a parameter.
 
 ```yaml
 apiVersion: tekton.dev/v1alpha1
@@ -350,6 +409,7 @@ status:
   - container: step-action-runner
     imageID: docker.io/library/alpine@sha256:eece025e432126ce23f223450a0326fbebde39cdf496a85d8c016293fc851978
     name: action-runner
+    terminationReason: Completed
     terminated:
       containerID: containerd://46a836588967202c05b594696077b147a0eb0621976534765478925bb7ce57f6
       exitCode: 0
@@ -461,8 +521,103 @@ spec:
 
 The default resolver type can be configured by the `default-resolver-type` field in the `config-defaults` ConfigMap (`alpha` feature). See [additional-configs.md](./additional-configs.md) for details.
 
-## Known Limitations
+### Controlling Step Execution with when Expressions
 
-### Cannot pass Step Results between Steps
+You can define `when` in a `step` to control its execution. 
 
-It's not currently possible to pass results produced by a `Step` into following `Steps`. We are working on this feature and it will be made available soon.
+The components of `when` expressions are `input`, `operator`, `values`, `cel`:
+
+| Component  | Description                                                                                                                                                                                                                                                      | Syntax                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `input`    | Input for the `when` expression, defaults to an empty string if not provided.                                                                                                                                                                                    | * Static values e.g. `"ubuntu"`<br/> * Variables (parameters or results) e.g. `"$(params.image)"` or `"$(tasks.task1.results.image)"` or `"$(tasks.task1.results.array-results[1])"`                                                                                                                                                                                                                                                                                                                                                       |
+| `operator` | `operator` represents an `input`'s relationship to a set of `values`, a valid `operator` must be provided.                                                                                                                                                       | `in` or `notin`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `values`   | An array of string values, the `values` array must be provided and has to be non-empty.                                                                                                                                                                          | * An array param e.g. `["$(params.images[*])"]`<br/> * An array result of a task `["$(tasks.task1.results.array-results[*])"]`<br/> * An array result of a step`["(steps.step1.results.array-results[*])"]`<br/>* `values` can contain static values e.g. `"ubuntu"`<br/> * `values` can contain variables (parameters or results) or a Workspaces's `bound` state e.g. `["$(params.image)"]` or `["$(steps.step1.results.image)"]` or `["$(tasks.task1.results.array-results[1])"]` or `["$(steps.step1.results.array-results[1])"]` |
+| `cel`      | The Common Expression Language (CEL) implements common semantics for expression evaluation, enabling different applications to more easily interoperate. This is an `alpha` feature, `enable-cel-in-whenexpression` needs to be set to true to use this feature. |  [cel-syntax](https://github.com/google/cel-spec/blob/master/doc/langdef.md#syntax)
+
+The below example shows how to use when expressions to control step executions:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-pvc-2
+spec:
+  resources:
+    requests:
+      storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+---
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  generateName: step-when-example
+spec:
+  workspaces:
+    - name: custom
+      persistentVolumeClaim:
+        claimName: my-pvc-2
+  taskSpec:
+    description: |
+      A simple task that shows how to use when determine if a step should be executed
+    steps:
+      - name: should-execute
+        image: bash:latest
+        script: |
+          #!/usr/bin/env bash
+          echo "executed..."
+        when:
+          - input: "$(workspaces.custom.bound)"
+            operator: in
+            values: [ "true" ]
+      - name: should-skip
+        image: bash:latest
+        script: |
+          #!/usr/bin/env bash
+          echo skipskipskip
+        when:
+          - input: "$(workspaces.custom2.bound)"
+            operator: in
+            values: [ "true" ]
+      - name: should-continue
+        image: bash:latest
+        script: |
+          #!/usr/bin/env bash
+          echo blabalbaba
+      - name: produce-step
+        image: alpine
+        results:
+          - name: result2
+            type: string
+        script: |
+          echo -n "foo" | tee $(step.results.result2.path)
+      - name: run-based-on-step-results
+        image: alpine
+        script: |
+          echo "wooooooo"
+        when:
+          - input: "$(steps.produce-step.results.result2)"
+            operator: in
+            values: [ "bar" ]
+    workspaces:
+      - name: custom
+```
+
+The StepState for a skipped step looks like something similar to the below:
+```yaml
+      {
+        "container": "step-run-based-on-step-results",
+        "imageID": "docker.io/library/alpine@sha256:c5b1261d6d3e43071626931fc004f70149baeba2c8ec672bd4f27761f8e1ad6b",
+        "name": "run-based-on-step-results",
+        "terminated": {
+          "containerID": "containerd://bf81162e79cf66a2bbc03e3654942d3464db06ff368c0be263a8a70f363a899b",
+          "exitCode": 0,
+          "finishedAt": "2024-03-26T03:57:47Z",
+          "reason": "Completed",
+          "startedAt": "2024-03-26T03:57:47Z"
+        },
+        "terminationReason": "Skipped"
+      }
+```
+Where `terminated.exitCode` is `0` and `terminationReason` is `Skipped` to indicate the Step exited successfully and was skipped. 

@@ -60,12 +60,6 @@ func TestTaskRef_Valid(t *testing.T) {
 				StringVal: "baz",
 			},
 		}}}},
-	}, {
-		name: "valid bundle",
-		taskRef: &v1beta1.TaskRef{
-			Name:   "bundled-task",
-			Bundle: "gcr.io/my-bundle"},
-		wc: enableTektonOCIBundles(t),
 	}}
 	for _, ts := range tests {
 		t.Run(ts.name, func(t *testing.T) {
@@ -91,85 +85,45 @@ func TestTaskRef_Invalid(t *testing.T) {
 		taskRef: &v1beta1.TaskRef{},
 		wantErr: apis.ErrMissingField("name"),
 	}, {
-		name: "use of bundle without the feature flag set",
-		taskRef: &v1beta1.TaskRef{
-			Name:   "my-task",
-			Bundle: "docker.io/foo",
-		},
-		wantErr: apis.ErrGeneric("bundle requires \"enable-tekton-oci-bundles\" feature gate to be true but it is false"),
-	}, {
-		name: "bundle missing name",
-		taskRef: &v1beta1.TaskRef{
-			Bundle: "docker.io/foo",
-		},
-		wantErr: apis.ErrMissingField("name"),
-		wc:      enableTektonOCIBundles(t),
-	}, {
-		name: "invalid bundle reference",
-		taskRef: &v1beta1.TaskRef{
-			Name:   "my-task",
-			Bundle: "invalid reference",
-		},
-		wantErr: apis.ErrInvalidValue("invalid bundle reference", "bundle", "could not parse reference: invalid reference"),
-		wc:      enableTektonOCIBundles(t),
-	}, {
-		name: "taskref params disallowed without resolver",
-		taskRef: &v1beta1.TaskRef{
-			ResolverRef: v1beta1.ResolverRef{
-				Params: v1beta1.Params{},
-			},
-		},
-		wantErr: apis.ErrMissingField("resolver"),
-	}, {
-		name: "taskref resolver disallowed in conjunction with taskref name",
+		name: "taskRef with resolver and k8s style name",
 		taskRef: &v1beta1.TaskRef{
 			Name: "foo",
 			ResolverRef: v1beta1.ResolverRef{
 				Resolver: "git",
 			},
 		},
-		wantErr: apis.ErrMultipleOneOf("name", "resolver"),
+		wantErr: apis.ErrInvalidValue(`invalid URI for request`, "name"),
+		wc:      enableConciseResolverSyntax,
 	}, {
-		name: "taskref resolver disallowed in conjunction with taskref bundle",
+		name: "taskRef with url-like name without resolver",
 		taskRef: &v1beta1.TaskRef{
-			Bundle: "bar",
+			Name: "https://foo.com/bar",
+		},
+		wantErr: apis.ErrMissingField("resolver"),
+		wc:      enableConciseResolverSyntax,
+	}, {
+		name: "taskRef params disallowed in conjunction with pipelineref name",
+		taskRef: &v1beta1.TaskRef{
+			Name: "https://foo/bar",
 			ResolverRef: v1beta1.ResolverRef{
 				Resolver: "git",
+				Params:   v1beta1.Params{{Name: "foo", Value: v1beta1.ParamValue{StringVal: "bar"}}},
 			},
 		},
-		wantErr: apis.ErrMultipleOneOf("bundle", "resolver"),
-		wc:      enableTektonOCIBundles(t),
+		wantErr: apis.ErrMultipleOneOf("name", "params"),
+		wc:      enableConciseResolverSyntax,
 	}, {
-		name: "taskref params disallowed in conjunction with taskref name",
-		taskRef: &v1beta1.TaskRef{
-			Name: "bar",
-			ResolverRef: v1beta1.ResolverRef{
-				Params: v1beta1.Params{{
-					Name: "foo",
-					Value: v1beta1.ParamValue{
-						Type:      v1beta1.ParamTypeString,
-						StringVal: "bar",
-					},
-				}},
-			},
-		},
-		wantErr: apis.ErrMultipleOneOf("name", "params").Also(apis.ErrMissingField("resolver")),
+		name:    "taskRef with url-like name without enable-concise-resolver-syntax",
+		taskRef: &v1beta1.TaskRef{Name: "https://foo.com/bar"},
+		wantErr: apis.ErrMissingField("resolver").Also(&apis.FieldError{
+			Message: `feature flag enable-concise-resolver-syntax should be set to true to use concise resolver syntax`,
+		}),
 	}, {
-		name: "taskref params disallowed in conjunction with taskref bundle",
-		taskRef: &v1beta1.TaskRef{
-			Bundle: "bar",
-			ResolverRef: v1beta1.ResolverRef{
-				Params: v1beta1.Params{{
-					Name: "foo",
-					Value: v1beta1.ParamValue{
-						Type:      v1beta1.ParamTypeString,
-						StringVal: "bar",
-					},
-				}},
-			},
+		name:    "taskRef without enable-concise-resolver-syntax",
+		taskRef: &v1beta1.TaskRef{Name: "https://foo.com/bar", ResolverRef: v1beta1.ResolverRef{Resolver: "git"}},
+		wantErr: &apis.FieldError{
+			Message: `feature flag enable-concise-resolver-syntax should be set to true to use concise resolver syntax`,
 		},
-		wantErr: apis.ErrMultipleOneOf("bundle", "params").Also(apis.ErrMissingField("resolver")),
-		wc:      enableTektonOCIBundles(t),
 	}, {
 		name:    "invalid taskref name",
 		taskRef: &v1beta1.TaskRef{Name: "_foo"},
@@ -177,24 +131,6 @@ func TestTaskRef_Invalid(t *testing.T) {
 			Message: `invalid value: name part must consist of alphanumeric characters, '-', '_' or '.', and must start and end with an alphanumeric character (e.g. 'MyName',  or 'my.name',  or '123-abc', regex used for validation is '([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]')`,
 			Paths:   []string{"name"},
 		},
-	}, {
-		name: "taskref param object requires beta",
-		taskRef: &v1beta1.TaskRef{
-			ResolverRef: v1beta1.ResolverRef{
-				Resolver: "some-resolver",
-				Params: v1beta1.Params{{
-					Name: "foo",
-					Value: v1beta1.ParamValue{
-						Type:      v1beta1.ParamTypeObject,
-						ObjectVal: map[string]string{"bar": "baz"},
-					},
-				}},
-			},
-		},
-		wc: cfgtesting.EnableStableAPIFields,
-		wantErr: apis.ErrGeneric("resolver requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\"").Also(
-			apis.ErrGeneric("resolver params requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\"")).Also(
-			apis.ErrGeneric("object type parameter requires \"enable-api-fields\" feature gate to be \"alpha\" or \"beta\" but it is \"stable\"")),
 	}}
 	for _, ts := range tests {
 		t.Run(ts.name, func(t *testing.T) {

@@ -9,7 +9,8 @@ TESTPKGS = $(shell env GO111MODULE=on $(GO) list -f \
 BIN      = $(CURDIR)/.bin
 WOKE 	?= go run -modfile go.mod github.com/get-woke/woke
 
-GOLANGCI_VERSION = v1.52.2
+# Get golangci_version from tools/go.mod
+GOLANGCI_VERSION := $(shell cat tools/go.mod | grep golangci-lint | awk '{ print $$3 }')
 WOKE_VERSION     = v0.19.0
 
 GO           = go
@@ -164,20 +165,22 @@ $(BIN)/errcheck: PACKAGE=github.com/kisielk/errcheck
 errcheck: | $(ERRCHECK) ; $(info $(M) running errcheck…) ## Run errcheck
 	$Q $(ERRCHECK) ./...
 
-GOLANGCILINT = $(BIN)/golangci-lint
-$(BIN)/golangci-lint: ; $(info $(M) getting golangci-lint $(GOLANGCI_VERSION))
-	cd tools; GOBIN=$(BIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_VERSION)
+GOLANGCILINT = $(BIN)/golangci-lint-$(GOLANGCI_VERSION)
+$(BIN)/golangci-lint-$(GOLANGCI_VERSION): ; $(info $(M) getting golangci-lint $(GOLANGCI_VERSION))
+	cd tools; go mod download github.com/golangci/golangci-lint && go mod tidy 
+	cd tools; go build -o $(BIN)/golangci-lint-$(GOLANGCI_VERSION) github.com/golangci/golangci-lint/cmd/golangci-lint
 
 .PHONY: golangci-lint
 golangci-lint: | $(GOLANGCILINT) ; $(info $(M) running golangci-lint…) @ ## Run golangci-lint
-	$Q $(GOLANGCILINT) run --modules-download-mode=vendor --max-issues-per-linter=0 --max-same-issues=0 --deadline 5m
+	$Q $(GOLANGCILINT) run --modules-download-mode=vendor --max-issues-per-linter=0 --max-same-issues=0 --timeout 5m
 
 .PHONY: golangci-lint-check
 golangci-lint-check: | $(GOLANGCILINT) ; $(info $(M) Testing if golint has been done…) @ ## Run golangci-lint for build tests CI job
 	$Q $(GOLANGCILINT) run -j 1 --color=never
 
 GOIMPORTS = $(BIN)/goimports
-$(BIN)/goimports: PACKAGE=golang.org/x/tools/cmd/goimports
+$(BIN)/goimports: | $(BIN) ; $(info $(M) building goimports…)
+	GOBIN=$(BIN) go install golang.org/x/tools/cmd/goimports@latest
 
 .PHONY: goimports
 goimports: | $(GOIMPORTS) ; $(info $(M) running goimports…) ## Run goimports

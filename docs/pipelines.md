@@ -301,8 +301,8 @@ spec:
 If the `Param` value passed in by `PipelineRun` is **NOT** in the predefined `enum` list, the `PipelineRun` will fail with reason `InvalidParamValue`.
 
 If a `PipelineTask` references a `Task` with `enum`, the `enums` specified in the Pipeline `spec.params` (pipeline-level `enum`) must be
-a **subset** of the `enums` specified in the referenced `Task` (task-level `enum`). An empty pipeline-level `enum` is invalid 
-in this scenario since an empty `enum` set indicates a "universal set" which allows all possible values. The same rules apply to `Pipelines` with embbeded `Tasks`. 
+a **subset** of the `enums` specified in the referenced `Task` (task-level `enum`). An empty pipeline-level `enum` is invalid
+in this scenario since an empty `enum` set indicates a "universal set" which allows all possible values. The same rules apply to `Pipelines` with embbeded `Tasks`.
 
 In the below example, the referenced `Task` accepts `v1` and `v2` as valid values, the `Pipeline` further restricts the valid value to `v1`.
 
@@ -369,6 +369,45 @@ any resolved `param` value against the `enum` specified in each `PipelineTask` b
 
 See usage in this [example](../examples/v1/pipelineruns/alpha/param-enum.yaml)
 
+#### Propagated Params
+
+Like with embedded [pipelineruns](pipelineruns.md#propagated-parameters), you can propagate `params` declared in the `pipeline` down to the inlined `pipelineTasks` and its inlined `Steps`. Wherever a resource (e.g. a `pipelineTask`) or a `StepAction` is referenced, the parameters need to be passed explicitly. 
+
+For example, the following is a valid yaml.
+
+```yaml
+apiVersion: tekton.dev/v1 # or tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: pipelien-propagated-params
+spec:
+  params:
+    - name: HELLO
+      default: "Hello World!"
+    - name: BYE
+      default: "Bye World!"
+  tasks:
+    - name: echo-hello
+      taskSpec:
+        steps:
+          - name: echo
+            image: ubuntu
+            script: |
+              #!/usr/bin/env bash
+              echo "$(params.HELLO)"
+    - name: echo-bye
+      taskSpec:
+        steps:
+          - name: echo-action
+            ref:
+              name: step-action-echo
+            params:
+              - name: msg
+                value: "$(params.BYE)" 
+```
+The same rules defined in [pipelineruns](pipelineruns.md#propagated-parameters) apply here.
+
+
 ## Adding `Tasks` to the `Pipeline`
 
  Your `Pipeline` definition must reference at least one [`Task`](tasks.md).
@@ -433,6 +472,10 @@ spec:
 Specifying task results in the `displayName` does not introduce an inherent resource dependency among `tasks`. The
 pipeline author is responsible for specifying dependency explicitly either using [runAfter](#using-the-runafter-field)
 or rely on [whenExpressions](#guard-task-execution-using-when-expressions) or [task results in params](#using-results).
+
+Fully resolved `displayName` is also available in the status as part of the `pipelineRun.status.childReferences`. The
+clients such as the dashboard, CLI, etc. can retrieve the `displayName` from the `childReferences`. The `displayName` mainly
+drives a better user experience and at the same time it is not validated for the content or length by the controller.
 
 ### Specifying Remote Tasks
 
@@ -581,45 +624,24 @@ There is currently a hard limit of 20 objects in a bundle.
 
 You can reference a `Tekton bundle` in a `TaskRef` in both `v1` and `v1beta1` using [remote resolution](./bundle-resolver.md#pipeline-resolution). The example syntax shown below for `v1` uses remote resolution and requires enabling [beta features](./additional-configs.md#beta-features).
 
-In `v1beta1`, you can also reference a `Tekton bundle` using OCI bundle syntax, which has been deprecated in favor of remote resolution. The example shown below for `v1beta1` uses OCI bundle syntax, and requires enabling `enable-tekton-oci-bundles: "true"` feature flag.
-
-
-{{< tabs >}}
-{{% tab "v1 & v1beta1" %}}
-```yaml
-spec:
-  taskRef:
-    resolver: bundles
-    params:
-    - name: bundle
-      value: docker.io/myrepo/mycatalog
-    - name: name
-      value: echo-task
-    - name: kind
-      value: Task
-```
-{{% /tab %}}
-
-{{% tab "v1beta1" %}}
 ```yaml
 spec:
   tasks:
     - name: hello-world
       taskRef:
-        name: echo-task
-        bundle: docker.com/myrepo/mycatalog
+        resolver: bundles
+        params:
+        - name: bundle
+          value: docker.io/myrepo/mycatalog
+        - name: name
+          value: echo-task
+        - name: kind
+          value: Task
 ```
-{{% /tab %}}
-{{< /tabs >}}
-
-Here, the `bundle` field is the full reference url to the artifact. The name is the
-`metadata.name` field of the `Task`.
 
 You may also specify a `tag` as you would with a Docker image which will give you a fixed,
 repeatable reference to a `Task`.
 
-{{< tabs >}}
-{{% tab "v1 & v1beta1" %}}
 ```yaml
 spec:
   taskRef:
@@ -632,24 +654,9 @@ spec:
     - name: kind
       value: Task
 ```
-{{% /tab %}}
-
-{{% tab "v1beta1" %}}
-```yaml
-spec:
-  tasks:
-    - name: hello-world
-      taskRef:
-        name: echo-task
-        bundle: docker.com/myrepo/mycatalog:v1.0.1
-```
-{{% /tab %}}
-{{< /tabs >}}
 
 You may also specify a fixed digest instead of a tag.
 
-{{< tabs >}}
-{{% tab "v1 & v1beta1" %}}
 ```yaml
 spec:
   taskRef:
@@ -662,19 +669,6 @@ spec:
     - name: kind
       value: Task
 ```
-{{% /tab %}}
-
-{{% tab "v1beta1" %}}
-```yaml
-spec:
-  tasks:
-    - name: hello-world
-      taskRef:
-        name: echo-task
-        bundle: docker.io/myrepo/mycatalog@sha256:abc123
-```
-{{% /tab %}}
-{{< /tabs >}}
 
 Any of the above options will fetch the image using the `ImagePullSecrets` attached to the
 `ServiceAccount` specified in the `PipelineRun`.
@@ -746,8 +740,6 @@ tasks:
 ```
 
 ### Using the `onError` field
-
-> :seedling: **Specifying `onError` in `PipelineTasks` is an [alpha](additional-configs.md#alpha-features) feature.** The `enable-api-fields` feature flag must be set to `"alpha"` to specify `onError`  in a `PipelineTask`.
 
 When a `PipelineTask` fails, the rest of the `PipelineTasks` are skipped and the `PipelineRun` is declared a failure. If you would like to
 ignore such `PipelineTask` failure and continue executing the rest of the `PipelineTasks`, you can specify `onError` for such a `PipelineTask`.
@@ -972,10 +964,10 @@ Whole `Array` and `Object` replacements are not supported yet. The following usa
 
 ```yaml
   when:
-    - cel: "'foo' in '$(params.array_params[*]']"
-    - cel: "'foo' in '$(params.object_params[*]']"
+    - cel: "'foo' in '$(params.array_params[*])'"
+    - cel: "'foo' in '$(params.object_params[*])'"
 ```
-
+<!-- wokeignore:rule=master -->
 In addition to the cases listed above, you can craft any valid CEL expression as defined by the [cel-spec language definition](https://github.com/google/cel-spec/blob/master/doc/langdef.md)
 
 
@@ -1273,6 +1265,10 @@ Tasks can emit [`Results`](tasks.md#emitting-results) when they execute. A Pipel
 1. A Pipeline can pass the `Result` of a `Task` into the `Parameters` or `when` expressions of another.
 2. A Pipeline can itself emit `Results` and include data from the `Results` of its Tasks.
 
+> **Note** Tekton does not enforce that results are produced at Task level. If a pipeline attempts to
+> consume a result that was declared by a Task, but not produced, it will fail. [TEP-0048](https://github.com/tektoncd/community/blob/main/teps/0048-task-results-without-results.md)
+> propopses introducing default values for results to help Pipeline authors manage this case.
+
 ### Passing one Task's `Results` into the `Parameters` or `when` expressions of another
 
 Sharing `Results` between `Tasks` in a `Pipeline` happens via
@@ -1280,7 +1276,7 @@ Sharing `Results` between `Tasks` in a `Pipeline` happens via
 a `Result` and another receives it as a `Parameter` with a variable such as
 `$(tasks.<task-name>.results.<result-name>)`. Pipeline support two new types of
 results and parameters: array `[]string` and object `map[string]string`.
-Array and Object result is a beta feature and can be enabled by setting `enable-api-fields` to `alpha` or `beta`.
+Array result is a beta feature and can be enabled by setting `enable-api-fields` to `alpha` or `beta`.
 
 | Result Type | Parameter Type | Specification                                    | `enable-api-fields` |
 |-------------|----------------|--------------------------------------------------|---------------------|
@@ -1375,8 +1371,7 @@ results:
 
 For an end-to-end example, see [`Results` in a `PipelineRun`](../examples/v1/pipelineruns/pipelinerun-results.yaml).
 
-Object result and array result are beta features,
-see [`Array and Object Results` in a `PipelineRun`](../examples/v1/pipelineruns/beta/pipeline-emitting-results.yaml).
+In the example below, the `Pipeline` collects array and object results from `Tasks`.
 
 ```yaml
     results:
@@ -1398,6 +1393,7 @@ see [`Array and Object Results` in a `PipelineRun`](../examples/v1/pipelineruns/
         value: $(tasks.task2.results.object-results.foo)
 ```
 
+For an end-to-end example see [`Array and Object Results` in a `PipelineRun`](../examples/v1/pipelineruns/pipeline-emitting-results.yaml).
 
 A `Pipeline Result` is not emitted if any of the following are true:
 - A `PipelineTask` referenced by the `Pipeline Result` failed. The `PipelineRun` will also
@@ -1541,6 +1537,10 @@ spec:
 The `displayName` also allows you to parameterize the human-readable name of your choice based on the
 [params](#specifying-parameters), [the task results](#consuming-task-execution-results-in-finally),
 and [the context variables](#context-variables).
+
+Fully resolved `displayName` is also available in the status as part of the `pipelineRun.status.childReferences`. The
+clients such as the dashboard, CLI, etc. can retrieve the `displayName` from the `childReferences`. The `displayName` mainly
+drives a better user experience and at the same time it is not validated for the content or length by the controller.
 
 ### Specifying `Workspaces` in `finally` tasks
 

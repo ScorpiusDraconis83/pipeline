@@ -2351,7 +2351,9 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[0], pts[1]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskReasonSuffix: "",
 			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                   PipelineTaskStateNone,
 		},
 	}, {
@@ -2360,7 +2362,9 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[0], pts[1]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskReasonSuffix: "",
 			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                   PipelineTaskStateNone,
 		},
 	}, {
@@ -2369,7 +2373,9 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[0], pts[1]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskStatusSuffix: v1.TaskRunReasonSuccessful.String(),
+			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskReasonSuffix: "Succeeded",
 			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                   PipelineTaskStateNone,
 		},
 	}, {
@@ -2378,7 +2384,9 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[0], pts[1]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskStatusSuffix: v1.TaskRunReasonFailed.String(),
+			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskReasonSuffix: "Failed",
 			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                   v1.PipelineRunReasonFailed.String(),
 		},
 	}, {
@@ -2387,7 +2395,9 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[0], pts[1]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskStatusSuffix: v1.TaskRunReasonSuccessful.String(),
+			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskReasonSuffix: "Succeeded",
 			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskStatusSuffix: v1.TaskRunReasonSuccessful.String(),
+			PipelineTaskStatusPrefix + pts[1].Name + PipelineTaskReasonSuffix: "Succeeded",
 			v1.PipelineTasksAggregateStatus:                                   v1.PipelineRunReasonSuccessful.String(),
 		},
 	}, {
@@ -2403,6 +2413,7 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[9]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[9].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[9].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                   PipelineTaskStateNone,
 		},
 	}, {
@@ -2417,6 +2428,7 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[10]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[10].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[10].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                    v1.PipelineRunReasonCompleted.String(),
 		},
 	}, {
@@ -2437,7 +2449,9 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[0], pts[11]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskStatusSuffix:  PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskReasonSuffix:  "",
 			PipelineTaskStatusPrefix + pts[11].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[11].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                    PipelineTaskStateNone,
 		},
 	}, {
@@ -2446,6 +2460,7 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[4]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[4].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[4].Name + PipelineTaskReasonSuffix: v1.TaskRunReasonCancelled.String(),
 			v1.PipelineTasksAggregateStatus:                                   PipelineTaskStateNone,
 		},
 	}, {
@@ -2467,7 +2482,9 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 		dagTasks: []v1.PipelineTask{pts[0], pts[10]},
 		expectedStatus: map[string]string{
 			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskStatusSuffix:  v1.PipelineRunReasonFailed.String(),
+			PipelineTaskStatusPrefix + pts[0].Name + PipelineTaskReasonSuffix:  v1.PipelineRunReasonFailed.String(),
 			PipelineTaskStatusPrefix + pts[10].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[10].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                    v1.PipelineRunReasonFailed.String(),
 		},
 	}}
@@ -3146,6 +3163,300 @@ func TestPipelineRunState_GetResultsFuncs(t *testing.T) {
 	}
 }
 
+func TestPipelineRunState_GetTaskRunsArtifacts(t *testing.T) {
+	testCases := []struct {
+		name              string
+		state             PipelineRunState
+		expectedArtifacts map[string]*v1.Artifacts
+	}{
+		{
+			name: "successful-task-with-artifacts",
+			state: PipelineRunState{{
+				TaskRunNames: []string{"successful-task-with-artifacts"},
+				PipelineTask: &v1.PipelineTask{
+					Name: "successful-task-with-artifacts-1",
+				},
+				TaskRuns: []*v1.TaskRun{{
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionTrue,
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}},
+			}},
+			expectedArtifacts: map[string]*v1.Artifacts{"successful-task-with-artifacts-1": {
+				Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+				Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+			}},
+		},
+		{
+			name: "two-successful-tasks-with-artifacts",
+			state: PipelineRunState{{
+				TaskRunNames: []string{"first-successful-task-with-artifacts"},
+				PipelineTask: &v1.PipelineTask{
+					Name: "successful-task-with-artifacts-1",
+				},
+				TaskRuns: []*v1.TaskRun{{
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionTrue,
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}},
+			}, {
+				TaskRunNames: []string{"second-successful-task-with-artifacts"},
+				PipelineTask: &v1.PipelineTask{
+					Name: "successful-task-with-artifacts-2",
+				},
+				TaskRuns: []*v1.TaskRun{{
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionTrue,
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}},
+			}},
+			expectedArtifacts: map[string]*v1.Artifacts{"successful-task-with-artifacts-1": {
+				Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+				Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+			}, "successful-task-with-artifacts-2": {
+				Inputs:  []v1.Artifact{{Name: "source2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+				Outputs: []v1.Artifact{{Name: "image2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+			}},
+		},
+		{
+			name: "Skip retrieving artifacts from unsuccessful task",
+			state: PipelineRunState{{
+				TaskRunNames: []string{"unsuccessful-task-with-artifacts"},
+				PipelineTask: &v1.PipelineTask{
+					Name: "unsuccessful-task-with-artifacts-1",
+				},
+				TaskRuns: []*v1.TaskRun{{
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionFalse,
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}},
+			}},
+			expectedArtifacts: map[string]*v1.Artifacts{},
+		},
+		{
+			name: "One successful task and one failed task, only retrieving artifacts from the successful one",
+			state: PipelineRunState{
+				{
+					TaskRunNames: []string{"successful-task-with-artifacts"},
+					PipelineTask: &v1.PipelineTask{
+						Name: "successful-task-with-artifacts-1",
+					},
+					TaskRuns: []*v1.TaskRun{{
+						Status: v1.TaskRunStatus{
+							Status: duckv1.Status{Conditions: []apis.Condition{{
+								Type:   apis.ConditionSucceeded,
+								Status: corev1.ConditionTrue,
+							}}},
+							TaskRunStatusFields: v1.TaskRunStatusFields{
+								Artifacts: &v1.Artifacts{
+									Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+									Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+								},
+							}},
+					}},
+				},
+				{
+					TaskRunNames: []string{"unsuccessful-task-with-artifacts"},
+					PipelineTask: &v1.PipelineTask{
+						Name: "unsuccessful-task-with-artifacts-1",
+					},
+					TaskRuns: []*v1.TaskRun{{
+						Status: v1.TaskRunStatus{
+							Status: duckv1.Status{Conditions: []apis.Condition{{
+								Type:   apis.ConditionSucceeded,
+								Status: corev1.ConditionFalse,
+							}}},
+							TaskRunStatusFields: v1.TaskRunStatusFields{
+								Artifacts: &v1.Artifacts{
+									Inputs:  []v1.Artifact{{Name: "source0", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+									Outputs: []v1.Artifact{{Name: "image0", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+								},
+							}},
+					}},
+				}},
+			expectedArtifacts: map[string]*v1.Artifacts{"successful-task-with-artifacts-1": {
+				Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+				Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+			}},
+		},
+		{
+			name: "One standard successful taskRun with artifacts and one custom task, custom task has no effect",
+			state: PipelineRunState{{
+				CustomRunNames: []string{"successful-run-without-results"},
+				CustomTask:     true,
+				PipelineTask: &v1.PipelineTask{
+					Name: "successful-run-without-results-1",
+				},
+				CustomRuns: []*v1beta1.CustomRun{
+					{
+						Status: v1beta1.CustomRunStatus{
+							Status: duckv1.Status{Conditions: []apis.Condition{{
+								Type:   apis.ConditionSucceeded,
+								Status: corev1.ConditionTrue,
+							}}},
+							CustomRunStatusFields: v1beta1.CustomRunStatusFields{},
+						},
+					}},
+			},
+				{
+					TaskRunNames: []string{"successful-task-with-artifacts"},
+					PipelineTask: &v1.PipelineTask{
+						Name: "successful-task-with-artifacts-1",
+					},
+					TaskRuns: []*v1.TaskRun{{
+						Status: v1.TaskRunStatus{
+							Status: duckv1.Status{Conditions: []apis.Condition{{
+								Type:   apis.ConditionSucceeded,
+								Status: corev1.ConditionTrue,
+							}}},
+							TaskRunStatusFields: v1.TaskRunStatusFields{
+								Artifacts: &v1.Artifacts{
+									Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+									Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+								},
+							}},
+					}},
+				},
+			},
+			expectedArtifacts: map[string]*v1.Artifacts{"successful-task-with-artifacts-1": {
+				Inputs:  []v1.Artifact{{Name: "source", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+				Outputs: []v1.Artifact{{Name: "image", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+			}},
+		},
+		{
+			name: "matrixed tasks",
+			state: PipelineRunState{{
+				TaskRunNames: []string{
+					"matrixed-task-run-0",
+					"matrixed-task-run-1",
+					"matrixed-task-run-2",
+					"matrixed-task-run-3",
+				},
+				PipelineTask: &v1.PipelineTask{
+					Name: "matrixed-task-with-artifacts",
+					TaskRef: &v1.TaskRef{
+						Name:       "task",
+						Kind:       "Task",
+						APIVersion: "v1",
+					},
+					Matrix: &v1.Matrix{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"foo", "bar"}},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"qux", "baz"}},
+						}}},
+				},
+				TaskRuns: []*v1.TaskRun{{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-0"},
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionTrue,
+							Reason: v1.TaskRunReasonSuccessful.String(),
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source1", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image1", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-1"},
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionTrue,
+							Reason: v1.TaskRunReasonSuccessful.String(),
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-2"},
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionTrue,
+							Reason: v1.TaskRunReasonSuccessful.String(),
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source3", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image3", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-3"},
+					Status: v1.TaskRunStatus{
+						Status: duckv1.Status{Conditions: []apis.Condition{{
+							Type:   apis.ConditionSucceeded,
+							Status: corev1.ConditionTrue,
+							Reason: v1.TaskRunReasonSuccessful.String(),
+						}}},
+						TaskRunStatusFields: v1.TaskRunStatusFields{
+							Artifacts: &v1.Artifacts{
+								Inputs:  []v1.Artifact{{Name: "source4", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+								Outputs: []v1.Artifact{{Name: "image4", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+							},
+						}},
+				}},
+			}},
+			expectedArtifacts: map[string]*v1.Artifacts{"matrixed-task-with-artifacts": {
+				Inputs:  []v1.Artifact{{Name: "source1", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}, {Name: "source2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}, {Name: "source3", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}, {Name: "source4", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha256": "b35cacccfdb1e24dc497d15d553891345fd155713ffe647c281c583269eaaae0"}, Uri: "pkg:example.github.com/inputs"}}}},
+				Outputs: []v1.Artifact{{Name: "image1", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}, {Name: "image2", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}, {Name: "image3", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}, {Name: "image4", Values: []v1.ArtifactValue{{Digest: map[v1.Algorithm]string{"sha1": "95588b8f34c31eb7d62c92aaa4e6506639b06ef2"}, Uri: "pkg:github/package-url/purl-spec@244fd47e07d1004f0aed9c"}}}},
+			}},
+		},
+	}
+
+	for _, tt := range testCases {
+		got := tt.state.GetTaskRunsArtifacts()
+		if d := cmp.Diff(tt.expectedArtifacts, got, cmpopts.SortSlices(func(a, b v1.Artifact) bool { return a.Name > b.Name })); d != "" {
+			t.Errorf("GetTaskRunsArtifacts() did not produce expected artifacts for test %s: %s", tt.name, diff.PrintWantGot(d))
+		}
+	}
+}
+
 func TestPipelineRunState_GetChildReferences(t *testing.T) {
 	testCases := []struct {
 		name      string
@@ -3193,7 +3504,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 			state: PipelineRunState{{
 				TaskRunNames: []string{"single-task-run"},
 				PipelineTask: &v1.PipelineTask{
-					Name: "single-task-1",
+					Name:        "single-task-1",
+					DisplayName: "Human readable name for single-task-1",
 					TaskRef: &v1.TaskRef{
 						Name:       "single-task",
 						Kind:       "Task",
@@ -3217,6 +3529,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				},
 				Name:             "single-task-run",
 				PipelineTaskName: "single-task-1",
+				DisplayName:      "Human readable name for single-task-1",
+
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
 					Operator: selection.In,
@@ -3230,7 +3544,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				CustomRunNames: []string{"single-custom-task-run"},
 				CustomTask:     true,
 				PipelineTask: &v1.PipelineTask{
-					Name: "single-custom-task-1",
+					Name:        "single-custom-task-1",
+					DisplayName: "Single Custom Task 1",
 					TaskRef: &v1.TaskRef{
 						APIVersion: "example.dev/v0",
 						Kind:       "Example",
@@ -3255,6 +3570,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				},
 				Name:             "single-custom-task-run",
 				PipelineTaskName: "single-custom-task-1",
+				DisplayName:      "Single Custom Task 1",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
 					Operator: selection.In,
@@ -3267,7 +3583,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 			state: PipelineRunState{{
 				TaskRunNames: []string{"single-task-run"},
 				PipelineTask: &v1.PipelineTask{
-					Name: "single-task-1",
+					Name:        "single-task-1",
+					DisplayName: "Single Task 1",
 					TaskRef: &v1.TaskRef{
 						Name:       "single-task",
 						Kind:       "Task",
@@ -3282,7 +3599,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				CustomRunNames: []string{"single-custom-task-run"},
 				CustomTask:     true,
 				PipelineTask: &v1.PipelineTask{
-					Name: "single-custom-task-1",
+					Name:        "single-custom-task-1",
+					DisplayName: "Single Custom Task 1",
 					TaskRef: &v1.TaskRef{
 						APIVersion: "example.dev/v0",
 						Kind:       "Example",
@@ -3302,6 +3620,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				},
 				Name:             "single-task-run",
 				PipelineTaskName: "single-task-1",
+				DisplayName:      "Single Task 1",
 			}, {
 				TypeMeta: runtime.TypeMeta{
 					APIVersion: "tekton.dev/v1beta1",
@@ -3309,6 +3628,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				},
 				Name:             "single-custom-task-run",
 				PipelineTaskName: "single-custom-task-1",
+				DisplayName:      "Single Custom Task 1",
 			}},
 		},
 		{
@@ -3316,7 +3636,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 			state: PipelineRunState{{
 				TaskRunNames: []string{"task-run-0", "task-run-1", "task-run-2", "task-run-3"},
 				PipelineTask: &v1.PipelineTask{
-					Name: "matrixed-task",
+					Name:        "matrixed-task",
+					DisplayName: "Matrixed Task",
 					TaskRef: &v1.TaskRef{
 						Name:       "task",
 						Kind:       "Task",
@@ -3345,7 +3666,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 			state: PipelineRunState{{
 				TaskRunNames: []string{"matrixed-task-run-0"},
 				PipelineTask: &v1.PipelineTask{
-					Name: "matrixed-task",
+					Name:        "matrixed-task",
+					DisplayName: "Matrixed Task $(params.foobar) and $(params.quxbaz)",
 					TaskRef: &v1.TaskRef{
 						Name:       "task",
 						Kind:       "Task",
@@ -3368,15 +3690,51 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				TaskRuns: []*v1.TaskRun{{
 					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
 					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-0"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}},
+					},
 				}, {
 					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
 					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-1"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}},
+					},
 				}, {
 					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
 					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-2"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}},
+					},
 				}, {
 					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
 					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-3"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}},
+					},
 				}},
 			}},
 			childRefs: []v1.ChildStatusReference{{
@@ -3385,6 +3743,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "TaskRun",
 				},
 				Name:             "matrixed-task-run-0",
+				DisplayName:      "Matrixed Task foo and qux",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3397,6 +3756,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "TaskRun",
 				},
 				Name:             "matrixed-task-run-1",
+				DisplayName:      "Matrixed Task foo and baz",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3409,6 +3769,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "TaskRun",
 				},
 				Name:             "matrixed-task-run-2",
+				DisplayName:      "Matrixed Task bar and qux",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3421,6 +3782,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "TaskRun",
 				},
 				Name:             "matrixed-task-run-3",
+				DisplayName:      "Matrixed Task bar and baz",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3460,7 +3822,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 			name: "matrixed-custom-task",
 			state: PipelineRunState{{
 				PipelineTask: &v1.PipelineTask{
-					Name: "matrixed-task",
+					Name:        "matrixed-task",
+					DisplayName: "Matrixed Task with Custom Run $(params.foobar) and $(params.quxbaz)",
 					TaskRef: &v1.TaskRef{
 						APIVersion: "example.dev/v0",
 						Kind:       "Example",
@@ -3481,10 +3844,10 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				},
 				CustomTask: true,
 				CustomRuns: []*v1beta1.CustomRun{
-					customRunWithName("matrixed-run-0"),
-					customRunWithName("matrixed-run-1"),
-					customRunWithName("matrixed-run-2"),
-					customRunWithName("matrixed-run-3"),
+					customRunWithName("matrixed-run-0", "foo", "qux"),
+					customRunWithName("matrixed-run-1", "foo", "baz"),
+					customRunWithName("matrixed-run-2", "bar", "qux"),
+					customRunWithName("matrixed-run-3", "bar", "baz"),
 				},
 			}},
 			childRefs: []v1.ChildStatusReference{{
@@ -3493,6 +3856,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "CustomRun",
 				},
 				Name:             "matrixed-run-0",
+				DisplayName:      "Matrixed Task with Custom Run foo and qux",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3505,6 +3869,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "CustomRun",
 				},
 				Name:             "matrixed-run-1",
+				DisplayName:      "Matrixed Task with Custom Run foo and baz",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3517,6 +3882,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "CustomRun",
 				},
 				Name:             "matrixed-run-2",
+				DisplayName:      "Matrixed Task with Custom Run bar and qux",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3529,6 +3895,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Kind:       "CustomRun",
 				},
 				Name:             "matrixed-run-3",
+				DisplayName:      "Matrixed Task with Custom Run bar and baz",
 				PipelineTaskName: "matrixed-task",
 				WhenExpressions: []v1.WhenExpression{{
 					Input:    "foo",
@@ -3543,7 +3910,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				{
 					TaskRunNames: []string{"task-generate-results"},
 					PipelineTask: &v1.PipelineTask{
-						Name: "task1",
+						Name:        "task1",
+						DisplayName: "Task 1",
 					},
 					TaskRuns: []*v1.TaskRun{
 						{
@@ -3583,7 +3951,8 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 				{
 					TaskRunNames: []string{"task-reference-previous-result"},
 					PipelineTask: &v1.PipelineTask{
-						Name: "task2",
+						Name:        "task2",
+						DisplayName: "Task 2 with $(tasks.task1.results.string-result) and $(tasks.task1.results.array-result[1])",
 						When: []v1.WhenExpression{
 							{
 								Input:    "$(tasks.task1.results.string-result)",
@@ -3620,6 +3989,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					},
 					Name:             "task-generate-results",
 					PipelineTaskName: "task1",
+					DisplayName:      "Task 1",
 				},
 				{
 					TypeMeta: runtime.TypeMeta{
@@ -3627,6 +3997,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 						Kind:       "TaskRun",
 					},
 					Name:             "task-reference-previous-result",
+					DisplayName:      "Task 2 with value1 and array-value2",
 					PipelineTaskName: "task2",
 					WhenExpressions: []v1.WhenExpression{
 						{
@@ -3642,6 +4013,418 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					},
 				},
 			},
+		}, {
+			name: "matrixed-task-with-displayName-and-include",
+			state: PipelineRunState{{
+				TaskRunNames: []string{"matrixed-task-run-0"},
+				PipelineTask: &v1.PipelineTask{
+					Name:        "matrixed-task",
+					DisplayName: "Matrixed Task $(params.foobar) and $(params.quxbaz)",
+					TaskRef: &v1.TaskRef{
+						Name:       "task",
+						Kind:       "Task",
+						APIVersion: "v1",
+					},
+					Matrix: &v1.Matrix{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"foo", "bar"}},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"qux", "baz"}},
+						}},
+						Include: v1.IncludeParamsList{{
+							Name: "Execute a random case for foo",
+							Params: v1.Params{{
+								Name:  "foobar",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "foo"},
+							}, {
+								Name:  "random",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+							}},
+						}, {
+							Name: "Does not exist",
+							Params: v1.Params{{
+								Name:  "foobar",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "foo-does-not-exist"},
+							}},
+						}},
+					},
+				},
+				TaskRuns: []*v1.TaskRun{{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-0"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}, {
+							Name:  "random",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-1"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}, {
+							Name:  "random",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-2"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-3"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-4"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo-does-not-exist"},
+						}},
+					},
+				}},
+			}},
+			childRefs: []v1.ChildStatusReference{{
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-0",
+				DisplayName:      "Execute a random case for foo",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-1",
+				DisplayName:      "Execute a random case for foo",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-2",
+				DisplayName:      "Matrixed Task bar and qux",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-3",
+				DisplayName:      "Matrixed Task bar and baz",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-4",
+				DisplayName:      "Does not exist",
+				PipelineTaskName: "matrixed-task",
+			}},
+		}, {
+			name: "matrixed-task-with-displayname-and-some-include-name",
+			state: PipelineRunState{{
+				TaskRunNames: []string{"matrixed-task-run-0"},
+				PipelineTask: &v1.PipelineTask{
+					Name:        "matrixed-task",
+					DisplayName: "Matrixed Task $(params.foobar) and $(params.quxbaz)",
+					TaskRef: &v1.TaskRef{
+						Name:       "task",
+						Kind:       "Task",
+						APIVersion: "v1",
+					},
+					Matrix: &v1.Matrix{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"foo", "bar"}},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"qux", "baz"}},
+						}},
+						Include: v1.IncludeParamsList{{
+							Name: "additional name for foo",
+							Params: v1.Params{{
+								Name:  "foobar",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "foo"},
+							}, {
+								Name:  "random1",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+							}},
+						}, {
+							Name: "one more additional name for foo",
+							Params: v1.Params{{
+								Name:  "foobar",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "foo"},
+							}, {
+								Name:  "random2",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+							}},
+						}},
+					},
+				},
+				TaskRuns: []*v1.TaskRun{{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-0"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}, {
+							Name:  "random1",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}, {
+							Name:  "random2",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-1"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}, {
+							Name:  "random1",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}, {
+							Name:  "random2",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-2"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-3"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}},
+					},
+				}},
+			}},
+			childRefs: []v1.ChildStatusReference{{
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-0",
+				DisplayName:      "additional name for foo one more additional name for foo",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-1",
+				DisplayName:      "additional name for foo one more additional name for foo",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-2",
+				DisplayName:      "Matrixed Task bar and qux",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-3",
+				DisplayName:      "Matrixed Task bar and baz",
+				PipelineTaskName: "matrixed-task",
+			}},
+		}, {
+			name: "matrixed-task-without-displayname-and-some-include-name",
+			state: PipelineRunState{{
+				TaskRunNames: []string{"matrixed-task-run-0"},
+				PipelineTask: &v1.PipelineTask{
+					Name: "matrixed-task",
+					TaskRef: &v1.TaskRef{
+						Name:       "task",
+						Kind:       "Task",
+						APIVersion: "v1",
+					},
+					Matrix: &v1.Matrix{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"foo", "bar"}},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: v1.ParamTypeArray, ArrayVal: []string{"qux", "baz"}},
+						}},
+						Include: v1.IncludeParamsList{{
+							Name: "task running foo and random",
+							Params: v1.Params{{
+								Name:  "foobar",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "foo"},
+							}, {
+								Name:  "random1",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+							}},
+						}, {
+							Params: v1.Params{{
+								Name:  "foobar",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "bar"},
+							}, {
+								Name:  "random2",
+								Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+							}},
+						}},
+					},
+				},
+				TaskRuns: []*v1.TaskRun{{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-0"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}, {
+							Name:  "random1",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-1"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}, {
+							Name:  "random1",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-2"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "qux"},
+						}, {
+							Name:  "random2",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}, {
+					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "matrixed-task-run-3"},
+					Spec: v1.TaskRunSpec{
+						Params: v1.Params{{
+							Name:  "foobar",
+							Value: v1.ParamValue{Type: "string", StringVal: "bar"},
+						}, {
+							Name:  "quxbaz",
+							Value: v1.ParamValue{Type: "string", StringVal: "baz"},
+						}, {
+							Name:  "random2",
+							Value: v1.ParamValue{Type: v1.ParamTypeString, StringVal: "random"},
+						}},
+					},
+				}},
+			}},
+			childRefs: []v1.ChildStatusReference{{
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-0",
+				DisplayName:      "task running foo and random",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-1",
+				DisplayName:      "task running foo and random",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-2",
+				PipelineTaskName: "matrixed-task",
+			}, {
+				TypeMeta: runtime.TypeMeta{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "TaskRun",
+				},
+				Name:             "matrixed-task-run-3",
+				PipelineTaskName: "matrixed-task",
+			}},
 		},
 	}
 	for _, tc := range testCases {
@@ -3702,10 +4485,19 @@ func TestConvertResultsMapToTaskRunResults(t *testing.T) {
 	}
 }
 
-func customRunWithName(name string) *v1beta1.CustomRun {
+func customRunWithName(name, p1, p2 string) *v1beta1.CustomRun {
 	return &v1beta1.CustomRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
+		},
+		Spec: v1beta1.CustomRunSpec{
+			Params: v1beta1.Params{{
+				Name:  "foobar",
+				Value: v1beta1.ParamValue{Type: "string", StringVal: p1},
+			}, {
+				Name:  "quxbaz",
+				Value: v1beta1.ParamValue{Type: "string", StringVal: p2},
+			}},
 		},
 	}
 }

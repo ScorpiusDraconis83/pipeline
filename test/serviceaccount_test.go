@@ -123,17 +123,17 @@ spec:
   - name: task1
     taskSpec:
       steps:
-      - image: ubuntu
+      - image: mirror.gcr.io/ubuntu
         script: echo task1
   - name: task2
     taskSpec:
       steps:
-      - image: ubuntu
+      - image: mirror.gcr.io/ubuntu
         script: echo task2
   - name: task3
     taskSpec:
       steps:
-      - image: ubuntu
+      - image: mirror.gcr.io/ubuntu
         script: echo task3
 `, helpers.ObjectNameForTest(t), namespace))
 	if _, err := c.V1PipelineClient.Create(ctx, pipeline, metav1.CreateOptions{}); err != nil {
@@ -168,7 +168,7 @@ spec:
 	}
 
 	// Verify it used those serviceAccount
-	taskRuns, err := c.V1TaskRunClient.List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("tekton.dev/pipelineRun=%s", pipelineRun.Name)})
+	taskRuns, err := c.V1TaskRunClient.List(ctx, metav1.ListOptions{LabelSelector: "tekton.dev/pipelineRun=" + pipelineRun.Name})
 	if err != nil {
 		t.Fatalf("Error listing TaskRuns for PipelineRun %s: %s", pipelineRun.Name, err)
 	}
@@ -179,7 +179,7 @@ spec:
 		if sa != expectedSA {
 			t.Fatalf("TaskRun %s expected SA %s, got %s", taskRun.Name, expectedSA, sa)
 		}
-		pods, err := c.KubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("tekton.dev/taskRun=%s", taskRun.Name)})
+		pods, err := c.KubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: "tekton.dev/taskRun=" + taskRun.Name})
 		if err != nil {
 			t.Fatalf("Error listing Pods for TaskRun %s: %s", taskRun.Name, err)
 		}
@@ -242,7 +242,7 @@ spec:
     taskSpec:
       metadata: {}
       steps:
-      - image: ubuntu
+      - image: mirror.gcr.io/ubuntu
         script: echo task1
 `, helpers.ObjectNameForTest(t), namespace))
 	if _, err := c.V1PipelineClient.Create(ctx, pipeline, metav1.CreateOptions{}); err != nil {
@@ -276,7 +276,7 @@ spec:
 	}
 
 	// Verify it used those serviceAccount
-	taskRuns, err := c.V1TaskRunClient.List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("tekton.dev/pipelineRun=%s", pipelineRun.Name)})
+	taskRuns, err := c.V1TaskRunClient.List(ctx, metav1.ListOptions{LabelSelector: "tekton.dev/pipelineRun=" + pipelineRun.Name})
 	if err != nil {
 		t.Fatalf("Error listing TaskRuns for PipelineRun %s: %s", pipelineRun.Name, err)
 	}
@@ -286,7 +286,7 @@ spec:
 		if sa != expectedSA {
 			t.Fatalf("TaskRun %s expected SA %s, got %s", taskRun.Name, expectedSA, sa)
 		}
-		pods, err := c.KubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("tekton.dev/taskRun=%s", taskRun.Name)})
+		pods, err := c.KubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: "tekton.dev/taskRun=" + taskRun.Name})
 		if err != nil {
 			t.Fatalf("Error listing Pods for TaskRun %s: %s", taskRun.Name, err)
 		}

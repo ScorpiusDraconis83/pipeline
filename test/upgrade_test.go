@@ -52,11 +52,11 @@ spec:
     default: "response"
   steps:
   - name: echo-param
-    image: alpine
+    image: mirror.gcr.io/alpine
     script: |
       echo "$(params.rsp)"
   - name: check-workspace
-    image: alpine
+    image: mirror.gcr.io/alpine
     script: |
       if [ "$(workspaces.taskWorkspace.bound)" == "true" ]; then
         echo "Workspace provided"
@@ -128,12 +128,12 @@ status:
     status: "True"
   taskSpec:
     steps:
-    - image: alpine
+    - image: mirror.gcr.io/alpine
       name: echo-param
       script: |
        echo "response"
     - name: check-workspace
-      image: alpine
+      image: mirror.gcr.io/alpine
       script: |
         if [ "true" == "true" ]; then
           echo "Workspace provided"
@@ -147,12 +147,15 @@ status:
   steps:
   - container: step-echo
     name: step-echo
+    terminationReason: Completed
     terminated:
       reason: Completed
   - container: check-workspace
     name: check-workspace
+    terminationReason: Completed
     terminated:
       reason: Completed
+  artifacts: {}
 `
 
 	expectedSimplePipelineRunYaml = `
